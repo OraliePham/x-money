@@ -63,6 +63,16 @@ export type ClickFirstTweetOptions = {
   randomOffsetPx?: number;
   extractMedia?: boolean;
 };
+
+export type FeedTab = 'for-you' | 'following';
+export type FollowMode = 'yes' | 'no';
+export type ToggleFollowAction = 'follow' | 'unfollow';
+export type ToggleFollowResult = {
+  success: boolean;
+  action: ToggleFollowAction | 'none';
+  username?: string;
+  error?: string;
+};
 // =============================================================================
 // TYPES & INTERFACES FOR COMMENT USERS
 // =============================================================================
@@ -94,7 +104,8 @@ export type ReadTweetFollowOptions = {
   scrollToLoadComments?: boolean; // Auto-scroll to load more comments (default: true)
   maxScrolls?: number;           // Maximum scrolls for loading comments (default: 5)
   timeoutMs?: number;            // Timeout for operations (default: 30000)
-  followVerified?: boolean;      // Automatically follow verified users (default: false)
+  follow?: FollowMode;           // yes/no follow action mode (default: no)
+  followVerified?: boolean;      // Deprecated: compatibility with old callers
   extractDetailedInfo?: boolean; // Open profile pages and enrich follower/profile details
   maxUsersToProcess?: number;    // Limit users processed for detailed extraction
 };
@@ -107,6 +118,22 @@ export type ReadTweetFollowResult = {
   skippedUsers: string[];        // Usernames that were skipped
   error?: string;
 };
+
+type FollowState = 'following' | 'not-following' | 'blocked' | 'unknown';
+type FollowButtonInfo = {
+  button: ReturnType<Page['locator']>;
+  currentState: Exclude<FollowState, 'unknown'>;
+  buttonText: string;
+};
+
+type FollowCandidate = {
+  currentState: Exclude<FollowState, 'unknown'>;
+  buttonText: string;
+  testId: string;
+  ariaLabel: string;
+  score: number;
+  top: number;
+};
 // =============================================================================
 // CONSTANTS
 // =============================================================================
@@ -115,6 +142,16 @@ const HOME_URL = 'https://x.com/home';
 const TWEET_SELECTOR = 'article[data-testid="tweet"]';
 const TWEET_TEXTAREA_SELECTOR = '[data-testid="tweetTextarea_0"]';
 const POST_TWEET_BUTTON_SELECTOR = '[data-testid="tweetButton"]';
+const RESERVED_X_PATH_SEGMENTS = new Set([
+  'home',
+  'explore',
+  'notifications',
+  'messages',
+  'search',
+  'settings',
+  'compose',
+  'i',
+]);
 
 // =============================================================================
 // HELPER FUNCTIONS
@@ -145,6 +182,170 @@ export class XActions {
   static async waitForFeed(page: Page, timeout = 15000): Promise<void> {
     await page.waitForSelector(TWEET_SELECTOR, { timeout });
     await HumanBehavior.delay(500, 1000);
+  }
+
+  /**
+   * Clicks "For you" or "Following" tab with robust fallback strategies.
+   */
+  static async clickNewFeedOrFollowingRobust(
+    page: Page,
+    tab: FeedTab,
+    options?: {
+      maxRetries?: number;
+      usePositionFallback?: boolean;
+    },
+  ): Promise<boolean> {
+    const maxRetries = options?.maxRetries ?? 3;
+    const usePositionFallback = options?.usePositionFallback ?? true;
+
+    for (let attempt = 1; attempt <= maxRetries; attempt += 1) {
+      console.log(`[feed-nav] Attempt ${attempt}/${maxRetries} to click "${tab}"`);
+
+      const clicked = await this.clickNewFeedOrFollowing(page, tab);
+      if (clicked) return true;
+
+      if (attempt < maxRetries) {
+        await page.waitForTimeout(1000 * attempt);
+      }
+    }
+
+    if (usePositionFallback) {
+      console.log('[feed-nav] Trying position-based fallback...');
+      const clickedByPosition = await this.clickNewFeedOrFollowingByPosition(page, tab);
+      if (clickedByPosition) return true;
+    }
+
+    console.error(`[feed-nav] Failed to switch to "${tab}"`);
+    return false;
+  }
+
+  private static async clickNewFeedOrFollowing(page: Page, tab: FeedTab): Promise<boolean> {
+    try {
+      await page.waitForSelector('nav[role="navigation"][aria-live="polite"]', {
+        state: 'visible',
+        timeout: 10000,
+      });
+
+      const tabText = tab === 'for-you' ? 'For you' : 'Following';
+      const result = await page.evaluate((targetText: string) => {
+        const tabs = document.querySelectorAll('div[role="tab"]');
+
+        for (const currentTab of Array.from(tabs)) {
+          const span = currentTab.querySelector('span.css-1jxf684');
+          if (span && span.textContent?.trim() === targetText) {
+            const isSelected = currentTab.getAttribute('aria-selected') === 'true';
+            if (isSelected) return 'already-selected';
+
+            (currentTab as HTMLElement).click();
+            return 'clicked';
+          }
+        }
+
+        return 'not-found';
+      }, tabText);
+
+      if (result === 'already-selected') {
+        console.log(`[feed-nav] Tab "${tabText}" already selected`);
+        return true;
+      }
+
+      if (result === 'not-found') {
+        console.warn(`[feed-nav] Tab "${tabText}" not found by text, trying fallback`);
+        return this.fallbackClickByTestId(page, tab);
+      }
+
+      await page.waitForTimeout(500);
+
+      const isNowSelected = await page.evaluate((targetText: string) => {
+        const tabs = document.querySelectorAll('div[role="tab"]');
+        for (const currentTab of Array.from(tabs)) {
+          const span = currentTab.querySelector('span.css-1jxf684');
+          if (span && span.textContent?.trim() === targetText) {
+            return currentTab.getAttribute('aria-selected') === 'true';
+          }
+        }
+        return false;
+      }, tabText);
+
+      if (isNowSelected) {
+        console.log(`[feed-nav] Switched to "${tabText}"`);
+        return true;
+      }
+
+      console.warn(`[feed-nav] Clicked "${tabText}" but could not confirm selection`);
+      return false;
+    } catch (error) {
+      console.error('[feed-nav] Error when switching tab:', error);
+      return false;
+    }
+  }
+
+  private static async fallbackClickByTestId(page: Page, tab: FeedTab): Promise<boolean> {
+    try {
+      const tabList = await page.$('[data-testid="ScrollSnap-List"]');
+      if (!tabList) {
+        console.warn('[feed-nav] ScrollSnap-List not found');
+        return false;
+      }
+
+      const tabs = await tabList.$$('div[role="presentation"] > div[role="tab"]');
+      if (tabs.length < 2) {
+        console.warn('[feed-nav] Not enough tabs found');
+        return false;
+      }
+
+      const tabIndex = tab === 'for-you' ? 0 : 1;
+      const targetTab = tabs[tabIndex];
+      if (!targetTab) {
+        console.warn(`[feed-nav] Tab index ${tabIndex} out of bounds`);
+        return false;
+      }
+
+      const isSelected = await targetTab.getAttribute('aria-selected');
+      if (isSelected === 'true') {
+        console.log(`[feed-nav] Tab "${tab}" already selected (fallback)`);
+        return true;
+      }
+
+      await targetTab.click();
+      await page.waitForTimeout(500);
+      console.log(`[feed-nav] Fallback click on "${tab}" succeeded`);
+      return true;
+    } catch (error) {
+      console.error('[feed-nav] Fallback click failed:', error);
+      return false;
+    }
+  }
+
+  private static async clickNewFeedOrFollowingByPosition(
+    page: Page,
+    tab: FeedTab,
+  ): Promise<boolean> {
+    try {
+      const navBar = await page.waitForSelector('nav[role="navigation"]', {
+        state: 'visible',
+        timeout: 10000,
+      });
+
+      if (!navBar) return false;
+
+      const box = await navBar.boundingBox();
+      if (!box) return false;
+
+      const x = tab === 'for-you' ? box.x + box.width * 0.25 : box.x + box.width * 0.75;
+      const y = box.y + box.height / 2;
+
+      await HumanBehavior.mouseMove(page, x, y);
+      await page.waitForTimeout(100);
+      await page.mouse.click(x, y);
+      await page.waitForTimeout(500);
+
+      console.log(`[feed-nav] Position fallback click on "${tab}" at (${x.toFixed(0)}, ${y.toFixed(0)})`);
+      return true;
+    } catch (error) {
+      console.error('[feed-nav] Position fallback failed:', error);
+      return false;
+    }
   }
 
   static async getFirstTweet(page: Page): Promise<TweetInfo | null> {
@@ -250,19 +451,19 @@ export class XActions {
         if (!article) return null;
         
         const textElement = article.querySelector('[data-testid="tweetText"]');
-        const tweetText = textElement?.innerText || '';
+        const tweetText = textElement?.textContent || '';
         
         const authorNameEl = article.querySelector('[data-testid="User-Name"] a span span');
-        const authorName = authorNameEl?.innerText || '';
+        const authorName = authorNameEl?.textContent || '';
         
         const authorUsernameEl = article.querySelector('[data-testid="User-Name"] a[href*="/"]:last-child span');
-        const authorUsername = authorUsernameEl?.innerText?.replace('@', '') || '';
+        const authorUsername = authorUsernameEl?.textContent?.replace('@', '') || '';
         
         const tweetLink = article.querySelector('a[href*="/status/"]')?.getAttribute('href');
         const tweetUrl = tweetLink ? `https://x.com${tweetLink}` : '';
         
         const tweetIdMatch = tweetUrl.match(/\/status\/(\d+)/);
-        const tweetId = tweetIdMatch ? tweetIdMatch[1] : undefined;
+        const tweetId = tweetIdMatch?.[1];
         
         const timeElement = article.querySelector('time');
         const timestamp = timeElement?.getAttribute('datetime') || '';
@@ -280,11 +481,10 @@ export class XActions {
           .filter(Boolean) as string[];
         
         const videoElement = article.querySelector('video');
-        const hasVideo = !!videoElement;
-        const videoPoster = videoElement?.getAttribute('poster') || undefined;
+        const videoPoster = videoElement?.getAttribute('poster');
         
         return {
-          id: tweetId,
+          ...(tweetId ? { id: tweetId } : {}),
           text: tweetText,
           tweetText: tweetText,
           authorName,
@@ -297,7 +497,7 @@ export class XActions {
           views: parseStatLocal(ariaLabel, 'views?'),
           isVerified: Boolean(article.querySelector('[data-testid="icon-verified"]')),
           mediaUrls: images,
-          ...(hasVideo && { videoPoster })
+          ...(videoPoster ? { videoPoster } : {}),
         };
       }, tweetIndex);
       
@@ -553,24 +753,31 @@ export class XActions {
     console.log(`🔗 Tweet link found: https://x.com${href}`);
 
     if (humanLike) {
-      // Lấy bounding box của LINK (chính xác hơn là của cả tweet)
-      const box = await tweet.boundingBox();
-      if (box) {
-        // Random position within tweet bounds
-        const randomX = box.x + (Math.random() * box.width);
-        const randomY = box.y + (Math.random() * box.height);
-        const offsetX = (Math.random() - 0.5) * randomOffsetPx;
-        const offsetY = (Math.random() - 0.5) * randomOffsetPx;
-        const clickX = Math.max(box.x, Math.min(box.x + box.width, randomX + offsetX));
-        const clickY = Math.max(box.y, Math.min(box.y + box.height, randomY + offsetY));
-        
-        console.log(`🎯 Clicking tweet at random position: (${clickX.toFixed(0)}, ${clickY.toFixed(0)})`);
-        
-        await HumanBehavior.mouseMove(page, clickX, clickY);
-        await HumanBehavior.delay(200, 400);
-        await page.mouse.click(clickX, clickY);
+      await tweetLink.scrollIntoViewIfNeeded();
+      const viewport = page.viewportSize();
+      const box = (await tweetLink.boundingBox()) ?? (await tweet.boundingBox());
+      if (box && viewport) {
+        const minX = Math.max(2, box.x);
+        const maxX = Math.min(viewport.width - 2, box.x + box.width);
+        const minY = Math.max(2, box.y);
+        const maxY = Math.min(viewport.height - 2, box.y + box.height);
+        const hasVisibleArea = maxX > minX && maxY > minY;
+
+        if (hasVisibleArea) {
+          const randomX = minX + Math.random() * (maxX - minX);
+          const randomY = minY + Math.random() * (maxY - minY);
+          const offsetX = (Math.random() - 0.5) * randomOffsetPx;
+          const offsetY = (Math.random() - 0.5) * randomOffsetPx;
+          const clickX = Math.max(minX, Math.min(maxX, randomX + offsetX));
+          const clickY = Math.max(minY, Math.min(maxY, randomY + offsetY));
+          console.log(`Clicking tweet link at: (${clickX.toFixed(0)}, ${clickY.toFixed(0)})`);
+          await HumanBehavior.mouseMove(page, clickX, clickY);
+          await HumanBehavior.delay(200, 400);
+          await page.mouse.click(clickX, clickY);
+        } else {
+          await tweetLink.click();
+        }
       } else {
-        // Fallback: click on the link directly
         await tweetLink.click();
       }
     } else {
@@ -608,7 +815,6 @@ export class XActions {
 
   static async clickTweetContaining(page: Page, searchText: string): Promise<boolean> {
     await this.waitForFeed(page);
-
     const tweet = page.locator(TWEET_SELECTOR).filter({ hasText: searchText }).first();
     if ((await tweet.count()) === 0) {
       return false;
@@ -668,7 +874,6 @@ export class XActions {
       screenshot,
       clickOnTextRandom = false,
       randomOffsetPx = 30,
-      extractMedia = true
     } = options;
 
     try {
@@ -770,10 +975,13 @@ export class XActions {
       onlyVerified = true,
       scrollToLoadComments = true,
       maxScrolls = 5,
+      follow,
       followVerified = false,
       extractDetailedInfo = false,
       maxUsersToProcess = 20,
     } = options;
+    const followMode: FollowMode = follow ?? (followVerified ? 'yes' : 'no');
+    const shouldFollow = followMode === 'yes';
 
     try {
       const tweetUrl = page.url();
@@ -929,22 +1137,47 @@ export class XActions {
       const followedUsers: string[] = [];
       const skippedUsers: string[] = [];
 
-      if (followVerified) {
+      if (shouldFollow) {
         for (const user of enrichedUsers) {
           if (!user.username) {
-            skippedUsers.push(user.username);
+            skippedUsers.push('unknown');
+            user.status = 'skipped';
             continue;
           }
 
           try {
-            const followed = await this.followUser(page, user.username);
-            if (followed) {
+            await this.goToProfile(page, user.username);
+            const toggleResult = await this.toggleFollowOnProfile(page, {
+              action: 'follow',
+              waitAfterClickMs: 1200,
+              confirmAction: true,
+            });
+
+            if (toggleResult.success && (toggleResult.action === 'follow' || toggleResult.action === 'none')) {
               followedUsers.push(user.username);
+              user.isFollowing = true;
+              user.status = 'followed';
+              const followMessage =
+                toggleResult.action === 'follow'
+                  ? `[follow] Followed @${user.username}`
+                  : `[follow] Already following @${user.username}`;
+              console.log(followMessage);
             } else {
               skippedUsers.push(user.username);
+              user.isFollowing = toggleResult.success;
+              user.status =
+                !toggleResult.success &&
+                (toggleResult.error?.toLowerCase().includes('blocked') ?? false)
+                  ? 'blocked'
+                  : 'skipped';
+              console.log(
+                `[follow] Skipped @${user.username}: ${toggleResult.error ?? 'unknown reason'}`,
+              );
             }
           } catch {
             skippedUsers.push(user.username);
+            user.status = 'skipped';
+            console.log(`[follow] Skipped @${user.username}: unexpected error`);
           }
 
           await HumanBehavior.delay(1500, 2600);
@@ -1294,46 +1527,341 @@ export class XActions {
     }, normalizedUsername);
   }
 
+  static async toggleFollowOnProfile(
+    page: Page,
+    options?: {
+      action?: ToggleFollowAction;
+      waitAfterClickMs?: number;
+      confirmAction?: boolean;
+    },
+  ): Promise<ToggleFollowResult> {
+    const waitAfterClickMs = options?.waitAfterClickMs ?? 1000;
+    const confirmAction = options?.confirmAction ?? true;
+
+    try {
+      const username = await this.extractUsernameFromProfile(page);
+      if (!username) {
+        return {
+          success: false,
+          action: 'none',
+          error: 'Could not extract username from profile page',
+        };
+      }
+
+      const buttonInfo = await this.findFollowButton(page, username);
+      if (!buttonInfo) {
+        return {
+          success: false,
+          action: 'none',
+          username,
+          error: 'Could not detect follow button in current profile UI',
+        };
+      }
+
+      const { button, currentState, buttonText } = buttonInfo;
+      console.log(`[toggle-follow] @${username}: state=${currentState}, text="${buttonText}"`);
+
+      if (currentState === 'blocked') {
+        return {
+          success: false,
+          action: 'none',
+          username,
+          error: 'User is blocked or follow action is unavailable',
+        };
+      }
+
+      const actionToTake: ToggleFollowAction =
+        options?.action ?? (currentState === 'following' ? 'unfollow' : 'follow');
+
+      if (
+        (actionToTake === 'follow' && currentState === 'following') ||
+        (actionToTake === 'unfollow' && currentState === 'not-following')
+      ) {
+        return {
+          success: true,
+          action: 'none',
+          username,
+        };
+      }
+
+      if (actionToTake === 'unfollow') {
+        await button.click();
+        await page.waitForTimeout(500);
+        const confirmed = await this.handleUnfollowConfirmation(page);
+        if (!confirmed) {
+          return {
+            success: false,
+            action: 'unfollow',
+            username,
+            error: 'Unfollow confirmation failed',
+          };
+        }
+      } else {
+        await button.click();
+      }
+
+      await page.waitForTimeout(waitAfterClickMs);
+
+      if (confirmAction) {
+        const newState = await this.checkFollowState(page, username);
+        const expectedState: FollowState =
+          actionToTake === 'follow' ? 'following' : 'not-following';
+        if (newState !== expectedState) {
+          return {
+            success: false,
+            action: actionToTake,
+            username,
+            error: `State mismatch after click: expected ${expectedState}, got ${newState}`,
+          };
+        }
+      }
+
+      return {
+        success: true,
+        action: actionToTake,
+        username,
+      };
+    } catch (error) {
+      return {
+        success: false,
+        action: 'none',
+        error: error instanceof Error ? error.message : String(error),
+      };
+    }
+  }
+
+  static async extractUsernameFromProfile(page: Page): Promise<string | null> {
+    return page.evaluate((reservedPathSegments) => {
+      const userNameSection = document.querySelector('[data-testid="UserName"]');
+      if (userNameSection) {
+        const spans = userNameSection.querySelectorAll('span');
+        for (const span of Array.from(spans)) {
+          const text = span.textContent?.trim();
+          if (text && text.startsWith('@') && text.length > 1) {
+            return text.replace('@', '');
+          }
+        }
+      }
+
+      const heading = document.querySelector('[data-testid="UserName"] span.css-1jxf684');
+      if (heading) {
+        const text = heading.textContent?.trim();
+        if (text && text.startsWith('@') && text.length > 1) {
+          return text.replace('@', '');
+        }
+      }
+
+      const path = window.location.pathname.split('/')[1]?.trim() ?? '';
+      if (path && !reservedPathSegments.includes(path.toLowerCase())) {
+        return path;
+      }
+
+      return null;
+    }, Array.from(RESERVED_X_PATH_SEGMENTS));
+  }
+
+  static async checkFollowState(page: Page, username?: string): Promise<FollowState> {
+    const detectedUsername = username ?? (await this.extractUsernameFromProfile(page)) ?? '';
+    const buttonInfo = await this.findFollowButton(page, detectedUsername);
+    return buttonInfo?.currentState ?? 'unknown';
+  }
+
+  private static async findFollowButton(
+    page: Page,
+    username: string,
+  ): Promise<FollowButtonInfo | null> {
+    try {
+      const selection = await page.evaluate((rawUsername) => {
+        const normalizedUsername = rawUsername.trim().replace(/^@/, '').toLowerCase();
+        const container = document.querySelector('[data-testid="primaryColumn"]') ?? document;
+        const buttons = Array.from(container.querySelectorAll('button[role="button"]'));
+        const followTerms = ['follow', 'follow back', 'theo doi'];
+        const followingTerms = ['following', 'dang theo doi'];
+        const blockedTerms = ['blocked', 'da chan'];
+
+        let winner: FollowCandidate | null = null;
+
+        for (const buttonEl of buttons) {
+          const button = buttonEl as HTMLButtonElement;
+          const style = window.getComputedStyle(button);
+          const rect = button.getBoundingClientRect();
+          const isVisible =
+            style.display !== 'none' &&
+            style.visibility !== 'hidden' &&
+            rect.width > 0 &&
+            rect.height > 0;
+          if (!isVisible) continue;
+
+          const testId = button.getAttribute('data-testid') ?? '';
+          const ariaLabel = (button.getAttribute('aria-label') ?? '').trim();
+          const buttonText =
+            button.querySelector('span')?.textContent?.trim() ?? button.textContent?.trim() ?? '';
+          const lowerText = buttonText
+            .toLowerCase()
+            .normalize('NFD')
+            .replace(/[\u0300-\u036f]/g, '')
+            .trim();
+          const lowerAria = ariaLabel
+            .toLowerCase()
+            .normalize('NFD')
+            .replace(/[\u0300-\u036f]/g, '')
+            .trim();
+
+          const top = rect.top;
+          let score = 0;
+          let currentState: FollowState = 'unknown';
+
+          if (testId.endsWith('-unfollow')) {
+            currentState = 'following';
+            score += 90;
+          } else if (testId.endsWith('-follow')) {
+            currentState = 'not-following';
+            score += 90;
+          } else if (testId.endsWith('-blocked')) {
+            currentState = 'blocked';
+            score += 90;
+          }
+
+          if (lowerAria.includes(`@${normalizedUsername}`)) score += 60;
+          if (lowerAria.includes('following @') || lowerAria.includes('dang theo doi @')) {
+            currentState = 'following';
+            score += 50;
+          } else if (
+            lowerAria.includes('follow @') ||
+            lowerAria.includes('theo doi @') ||
+            lowerAria.includes('follow back @')
+          ) {
+            currentState = 'not-following';
+            score += 50;
+          }
+
+          for (const term of followingTerms) {
+            if (lowerText === term) {
+              currentState = 'following';
+              score += 30;
+              break;
+            }
+          }
+
+          if (currentState === 'unknown') {
+            for (const term of followTerms) {
+              if (lowerText === term) {
+                currentState = 'not-following';
+                score += 30;
+                break;
+              }
+            }
+          }
+
+          if (currentState === 'unknown') {
+            for (const term of blockedTerms) {
+              if (lowerText.includes(term)) {
+                currentState = 'blocked';
+                score += 30;
+                break;
+              }
+            }
+          }
+
+          if (button.closest('[data-testid="userActions"]')) score += 120;
+          if (top > 0 && top < 700) score += 10;
+          if (currentState === 'unknown') continue;
+
+          const candidate: FollowCandidate = {
+            currentState,
+            buttonText: buttonText || currentState,
+            testId,
+            ariaLabel,
+            score,
+            top,
+          };
+
+          if (!winner || candidate.score > winner.score || (candidate.score === winner.score && candidate.top < winner.top)) {
+            winner = candidate;
+          }
+        }
+
+        return winner;
+      }, username);
+
+      if (!selection) return null;
+
+      let button =
+        selection.testId.length > 0
+          ? page.locator(`button[role="button"][data-testid="${selection.testId}"]`).first()
+          : page
+              .locator('button[role="button"]')
+              .filter({ hasText: selection.buttonText })
+              .first();
+
+      let visible = await button.isVisible({ timeout: 2000 }).catch(() => false);
+      if (!visible && selection.ariaLabel.length > 0) {
+        button = page
+          .locator(`button[role="button"][aria-label="${selection.ariaLabel.replace(/"/g, '\\"')}"]`)
+          .first();
+        visible = await button.isVisible({ timeout: 2000 }).catch(() => false);
+      }
+
+      if (!visible) return null;
+
+      return {
+        button,
+        currentState: selection.currentState,
+        buttonText: selection.buttonText,
+      };
+    } catch {
+      return null;
+    }
+  }
+
+  private static async handleUnfollowConfirmation(page: Page): Promise<boolean> {
+    try {
+      const confirmButton = page.locator('[data-testid="confirmationSheetConfirm"]').first();
+      if (await confirmButton.isVisible({ timeout: 3000 }).catch(() => false)) {
+        await confirmButton.click();
+        await page.waitForTimeout(500);
+        return true;
+      }
+
+      const unfollowButton = page.getByRole('button', { name: /^Unfollow$/i }).first();
+      if (await unfollowButton.isVisible({ timeout: 2000 }).catch(() => false)) {
+        await unfollowButton.click();
+        await page.waitForTimeout(500);
+        return true;
+      }
+
+      return true;
+    } catch {
+      return false;
+    }
+  }
+
   static async followUser(page: Page, username: string): Promise<boolean> {
     const normalizedUsername = normalizeUsername(username);
     await this.goToProfile(page, normalizedUsername);
 
-    const followButton = page.locator('[data-testid="followButton"]').first();
-    if ((await followButton.count()) === 0) return false;
+    const result = await this.toggleFollowOnProfile(page, {
+      action: 'follow',
+      waitAfterClickMs: 1200,
+      confirmAction: true,
+    });
 
-    const label = await followButton.getAttribute('aria-label');
-    if (label?.includes('Following')) {
-      console.log(`Already following @${normalizedUsername}`);
-      return false;
-    }
-
-    await HumanBehavior.clickLikeHuman(page, '[data-testid="followButton"]');
-    await HumanBehavior.delay(800, 1200);
-    console.log(`Followed @${normalizedUsername}`);
-    return true;
+    if (!result.success) return false;
+    return result.action === 'follow' || result.action === 'none';
   }
 
   static async unfollowUser(page: Page, username: string): Promise<boolean> {
     const normalizedUsername = normalizeUsername(username);
     await this.goToProfile(page, normalizedUsername);
 
-    const followButton = page.locator('[data-testid="followButton"]').first();
-    if ((await followButton.count()) === 0) return false;
+    const result = await this.toggleFollowOnProfile(page, {
+      action: 'unfollow',
+      waitAfterClickMs: 1200,
+      confirmAction: true,
+    });
 
-    const label = await followButton.getAttribute('aria-label');
-    if (!label?.includes('Following')) return false;
-
-    await HumanBehavior.clickLikeHuman(page, '[data-testid="followButton"]');
-    await HumanBehavior.delay(500, 800);
-
-    const confirmSelector = '[data-testid="confirmationSheetConfirm"]';
-    if ((await page.locator(confirmSelector).count()) > 0) {
-      await HumanBehavior.clickLikeHuman(page, confirmSelector);
-    }
-
-    await HumanBehavior.delay(800, 1200);
-    console.log(`Unfollowed @${normalizedUsername}`);
-    return true;
+    if (!result.success) return false;
+    return result.action === 'unfollow' || result.action === 'none';
   }
 
   // ===========================================================================
@@ -1533,3 +2061,4 @@ export class XActions {
 }
 
 export default XActions;
+

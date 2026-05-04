@@ -10,6 +10,7 @@ import * as fs from 'fs';
 
 import type { Page } from '@playwright/test';
 import type { XProfileData } from './sqlite-profile-storage.js';
+import type { FeedTab, FollowMode } from './x-actions.js';
 
 // =============================================================================
 // CONSTANTS
@@ -27,6 +28,9 @@ const LOGIN_DETECTION_TIMEOUT_MS = 120_000;
 type LauncherArgs = {
   profileId: string;
   targetUrl: string;
+  feedTab: FeedTab;
+  follow: FollowMode;
+  keepOpen: boolean;
   demoActions: boolean;
   demoSearch: boolean;
   dryRun: boolean;
@@ -46,17 +50,21 @@ type LauncherArgs = {
 // =============================================================================
 
 function parseArgs(argv: string[]): LauncherArgs {
-  const positionalArgs = argv.filter((arg) => !arg.startsWith('--'));
+  const positionalArgs = collectPositionalArgs(argv);
+  const followVerifiedUsers = argv.includes('--follow-verified-users');
 
   return {
     profileId: positionalArgs[0] ?? DEFAULT_PROFILE_ID,
     targetUrl: normalizeUrl(positionalArgs[1] ?? DEFAULT_TARGET_URL),
+    feedTab: parseFeedTab(argv),
+    follow: parseFollowMode(argv, followVerifiedUsers),
+    keepOpen: argv.includes('--keep-open'),
     demoActions: argv.includes('--demo-actions'),
     demoSearch: argv.includes('--demo-search'),
     dryRun: argv.includes('--dry-run'),
     likeCurrentTweet: argv.includes('--like-current-tweet'),
     readComments: argv.includes('--read-comments'),
-    followVerifiedUsers: argv.includes('--follow-verified-users'),
+    followVerifiedUsers,
     maxComments: parseMaxComments(argv),
     extractDetailedInfo: argv.includes('--extract-detailed-info'),
     maxUsersToProcess: parseMaxUsersToProcess(argv),
@@ -64,6 +72,48 @@ function parseArgs(argv: string[]): LauncherArgs {
     clickRandomOnText: argv.includes('--click-random-text'),
     screenshotBeforeClick: argv.includes('--screenshot'),
   };
+}
+
+function collectPositionalArgs(argv: string[]): string[] {
+  const flagsWithValues = new Set([
+    '--max-comments',
+    '--max-users-to-process',
+    '--feed-tab',
+    '--follow',
+  ]);
+  const positional: string[] = [];
+
+  for (let index = 0; index < argv.length; index += 1) {
+    const arg = argv[index];
+    if (!arg) continue;
+
+    if (flagsWithValues.has(arg)) {
+      index += 1;
+      continue;
+    }
+
+    if (arg.startsWith('--')) continue;
+    positional.push(arg);
+  }
+
+  return positional;
+}
+
+function parseFeedTab(argv: string[]): FeedTab {
+  const flagIndex = argv.findIndex((arg) => arg === '--feed-tab');
+  if (flagIndex === -1) return 'for-you';
+
+  const raw = argv[flagIndex + 1]?.trim().toLowerCase();
+  if (raw === 'following') return 'following';
+  return 'for-you';
+}
+
+function parseFollowMode(argv: string[], fallbackFollowVerified: boolean): FollowMode {
+  const flagIndex = argv.findIndex((arg) => arg === '--follow');
+  if (flagIndex === -1) return fallbackFollowVerified ? 'yes' : 'no';
+
+  const raw = argv[flagIndex + 1]?.trim().toLowerCase();
+  return raw === 'yes' ? 'yes' : 'no';
 }
 
 function parseMaxComments(argv: string[]): number {
@@ -106,6 +156,15 @@ function isXUrl(targetUrl: string): boolean {
 function isDirectRun(): boolean {
   const entryPoint = process.argv[1];
   return entryPoint !== undefined && import.meta.url === pathToFileURL(entryPoint).href;
+}
+
+async function waitForFeedSafe(page: Page, timeout = 10000): Promise<boolean> {
+  try {
+    await XActions.waitForFeed(page, timeout);
+    return true;
+  } catch {
+    return false;
+  }
 }
 
 // =============================================================================
@@ -188,7 +247,7 @@ async function demoXActionsEnhanced(page: Page, profileUsername?: string): Promi
   console.log('\n📌 Step 1: Navigating to Home feed...');
   await XActions.goToHome(page);
   
-  const feedLoaded = await XActions.waitForFeed(page, 10000);
+  const feedLoaded = await waitForFeedSafe(page, 10000);
   if (!feedLoaded) {
     console.log('❌ Feed did not load. Skipping demo.');
     return;
@@ -280,7 +339,7 @@ async function demoSearchActions(page: Page): Promise<void> {
   console.log(`\n📌 Searching for: "${searchQuery}"`);
   await XActions.search(page, searchQuery);
 
-  const feedLoaded = await XActions.waitForFeed(page, 10000);
+  const feedLoaded = await waitForFeedSafe(page, 10000);
   if (feedLoaded) {
     const searchResults = await XActions.getFirstTweetInfoOnly(page);
     if (searchResults) {
@@ -305,7 +364,7 @@ async function demoExtractTweetInfo(page: Page): Promise<void> {
 
   await XActions.goToHome(page);
   
-  const feedLoaded = await XActions.waitForFeed(page, 10000);
+  const feedLoaded = await waitForFeedSafe(page, 10000);
   if (!feedLoaded) {
     console.log('❌ Feed did not load');
     return;
@@ -374,7 +433,18 @@ async function runClickReadLikePipeline(
 ): Promise<void> {
   if (!args.likeCurrentTweet && !args.readComments) return;
 
-  console.log('\nRunning pipeline: clickFirstTweet -> readTweetFollow -> likeCurrentTweet');
+  console.log(
+    '\nRunning pipeline: clickNewFeedOrFollowing -> clickFirstTweet -> readTweetFollow -> likeCurrentTweet',
+  );
+
+  const switchedTab = await XActions.clickNewFeedOrFollowingRobust(page, args.feedTab, {
+    maxRetries: 3,
+    usePositionFallback: true,
+  });
+  if (!switchedTab) {
+    console.warn(`Could not confirm switching to "${args.feedTab}" tab, continuing anyway...`);
+  }
+  await HumanBehavior.delay(600, 1200);
 
   if (!page.url().includes('/status/')) {
     const clicked = await XActions.clickFirstTweet(page, true);
@@ -388,6 +458,7 @@ async function runClickReadLikePipeline(
   if (shouldReadComments) {
     const readResult = await XActions.readTweetFollow(page, {
       maxComments: args.maxComments,
+      follow: args.follow,
       followVerified: args.followVerifiedUsers,
       extractDetailedInfo: args.extractDetailedInfo,
       maxUsersToProcess: args.maxUsersToProcess,
@@ -403,7 +474,7 @@ async function runClickReadLikePipeline(
         readResult.skippedUsers,
       );
       console.log(
-        `readTweetFollow done: total=${readResult.totalComments}, verified=${readResult.verifiedUsers.length}, saved=${saved}`,
+        `readTweetFollow done: total=${readResult.totalComments}, verified=${readResult.verifiedUsers.length}, followed=${readResult.followedUsers.length}, skipped=${readResult.skippedUsers.length}, saved=${saved}`,
       );
     } else {
       console.log(`readTweetFollow failed: ${readResult.error ?? 'unknown error'}`);
@@ -480,7 +551,9 @@ async function runOptionalXActions(
 async function main(): Promise<void> {
   const args = parseArgs(process.argv.slice(2));
   const manager = new ProfileManagerWithSQLite('./browser_profiles', DEFAULT_DB_PATH);
-  const metadata = await manager.ensureProfile(args.profileId, args.targetUrl);
+  const metadata = await manager.ensureProfile(args.profileId, {
+    targetUrl: args.targetUrl,
+  });
   const storedProfile = manager.getStoredProfile(args.profileId);
 
   console.log('\n' + '='.repeat(60));
@@ -496,6 +569,9 @@ async function main(): Promise<void> {
 
   // Command line arguments info
   console.log('\n📋 Command line options:');
+  console.log(`   --feed-tab: ${args.feedTab}`);
+  console.log(`   --follow: ${args.follow}`);
+  console.log(`   --keep-open: ${args.keepOpen}`);
   console.log(`   --demo-actions: ${args.demoActions}`);
   console.log(`   --demo-search: ${args.demoSearch}`);
   console.log(`   --read-comments: ${args.readComments}`);
@@ -515,19 +591,26 @@ async function main(): Promise<void> {
     return;
   }
 
-  console.log('\n🖱️ Close the browser window or press Ctrl+C to stop.\n');
+  try {
+    const { context, page } = await manager.launchProfileWithRestore(args.profileId, {
+      targetUrl: args.targetUrl,
+    });
 
-  const { context, page } = await manager.launchProfileWithRestore(args.profileId, {
-    targetUrl: args.targetUrl,
-  });
+    await runHumanBehaviorWarmup(page);
+    await captureXProfileIfApplicable(manager, page, args.profileId, args.targetUrl);
+    await runOptionalXActions(page, manager, args.profileId, args);
 
-  await runHumanBehaviorWarmup(page);
-  await captureXProfileIfApplicable(manager, page, args.profileId, args.targetUrl);
-  await runOptionalXActions(page, manager, args.profileId, args);
-
-  console.log('\n💡 Browser will stay open. Press Ctrl+C or close the browser window to stop.');
-  await context.waitForEvent('close');
-  await manager.closeAll();
+    if (args.keepOpen) {
+      console.log('\n💡 Flow done. Browser is kept open (--keep-open).');
+      console.log('🖱️ Close the browser window or press Ctrl+C to stop.');
+      await context.waitForEvent('close', { timeout: 0 });
+    } else {
+      console.log('\n✅ Flow completed. Closing browser context...');
+      await context.close().catch(() => undefined);
+    }
+  } finally {
+    await manager.closeAll();
+  }
 }
 
 // =============================================================================

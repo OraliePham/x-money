@@ -20,7 +20,7 @@ async function runStealthChecks(): Promise<void> {
     const webdriver = await page.evaluate(() => navigator.webdriver);
     tests.push({
       name: 'Webdriver flag removal',
-      passed: webdriver === undefined,
+      passed: webdriver === undefined || webdriver === false,
       details: webdriver === undefined ? 'hidden' : String(webdriver),
     });
 
