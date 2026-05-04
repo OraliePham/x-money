@@ -1,0 +1,25 @@
+version: 2
+updates:
+  - package-ecosystem: npm
+    directory: /
+    schedule:
+      interval: weekly
+    open-pull-requests-limit: 5
+    groups:
+      playwright:
+        patterns:
+          - "@playwright/test"
+      linting:
+        patterns:
+          - "eslint*"
+          - "typescript-eslint"
+          - "prettier"
+      typescript:
+        patterns:
+          - "typescript"
+          - "@types/node"
+
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: weekly

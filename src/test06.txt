@@ -1,0 +1,352 @@
+================================================================================
+                    HƯỚNG DẪN PHÁT TRIỂN TÍNH NĂNG
+                    READ TWEET FOLLOW - LẤY USER TỪ COMMENT
+================================================================================
+
+MỤC ĐÍCH: Lấy thông tin các user đã comment vào tweet, đặc biệt là các user
+         có verified (xác minh), và lưu vào database để quản lý.
+
+================================================================================
+1. MÔ TẢ TÍNH NĂNG
+================================================================================
+
+Tính năng "readTweetFollow" dùng để:
+- Đọc tất cả comments/replies của một tweet
+- Trích xuất thông tin user đã comment (username, display name, avatar, stats)
+- Phát hiện user có verified (blue, gold, grey)
+- Lưu thông tin vào database SQLite
+- Tùy chọn tự động follow các verified user
+
+================================================================================
+2. CẤU TRÚC DỮ LIỆU LƯU TRỮ
+================================================================================
+
+2.1. Bảng comment_users trong SQLite:
+
+┌─────────────────────┬─────────────┬────────────────────────────────────────┐
+│ Tên cột             │ Kiểu dữ liệu│ Mô tả                                  │
+├─────────────────────┼─────────────┼────────────────────────────────────────┤
+│ id                  │ TEXT(PK)    │ Khóa chính: {profile_id}_{user_id}     │
+│ profile_id          │ TEXT(FK)    │ ID của profile đã đọc comment          │
+│ username            │ TEXT        │ Username (không có @)                   │
+│ display_name        │ TEXT        │ Tên hiển thị                            │
+│ is_verified         │ INTEGER     │ 0/1 - Có blue verified không           │
+│ is_gold_verified    │ INTEGER     │ 0/1 - Có gold verified không           │
+│ is_grey_verified    │ INTEGER     │ 0/1 - Có grey verified không           │
+│ followers_count     │ INTEGER     │ Số lượng followers                      │
+│ following_count     │ INTEGER     │ Số lượng following                      │
+│ tweet_count         │ INTEGER     │ Tổng số tweets                         │
+│ bio                 │ TEXT        │ Tiểu sử user                            │
+│ location            │ TEXT        │ Vị trí địa lý                           │
+│ avatar_url          │ TEXT        │ URL avatar                              │
+│ comment_text        │ TEXT        │ Nội dung comment                        │
+│ comment_timestamp   │ TEXT        │ Thời gian comment (ISO)                 │
+│ comment_url         │ TEXT        │ Link đến comment cụ thể                │
+│ status              │ TEXT        │ pending/followed/skipped/blocked       │
+│ is_followed         │ INTEGER     │ 0/1 - Đã follow hay chưa                │
+│ followed_at         │ DATETIME    │ Thời điểm follow                        │
+│ up_time             │ DATETIME    │ Thời gian tạo record                    │
+└─────────────────────┴─────────────┴────────────────────────────────────────┘
+
+2.2. Các chỉ mục (Indexes) cần tạo:
+
+- idx_comment_users_profile_id: Tìm kiếm theo profile_id
+- idx_comment_users_username: Tìm kiếm theo username
+- idx_comment_users_status: Lọc theo trạng thái
+- idx_comment_users_up_time: Sắp xếp theo thời gian
+
+================================================================================
+3. LUỒNG XỬ LÝ CỦA HÀM readTweetFollow
+================================================================================
+
+BƯỚC 1: Kiểm tra trang hiện tại
+─────────────────────────────────────────────────────────────────────────────
+- Xác nhận đang ở trang tweet detail (URL chứa '/status/')
+- Nếu không, báo lỗi và thoát
+
+BƯỚC 2: Load comments
+─────────────────────────────────────────────────────────────────────────────
+- Scroll để load thêm comments (tối đa N lần)
+- Mỗi lần scroll chờ 1.5-2 giây
+- Dừng khi không còn comments mới
+
+BƯỚC 3: Trích xuất thông tin user
+─────────────────────────────────────────────────────────────────────────────
+- Lấy tất cả article[data-testid="tweet"]
+- Bỏ qua tweet đầu tiên (tweet gốc)
+- Duyệt qua từng reply và trích xuất:
+  • Username và display name
+  • Verification status (blue/gold/grey)
+  • Nội dung comment
+  • Thời gian comment
+  • Avatar URL
+  • Follower counts (nếu có)
+
+BƯỚC 4: Lọc verified users
+─────────────────────────────────────────────────────────────────────────────
+- Chỉ giữ lại user có is_verified = true
+- (Tùy chọn) Có thể lấy tất cả user
+
+BƯỚC 5: Lưu vào database
+─────────────────────────────────────────────────────────────────────────────
+- Ghi thông tin vào bảng comment_users
+- Cập nhật nếu đã tồn tại (INSERT OR REPLACE)
+
+BƯỚC 6: (Tùy chọn) Auto-follow
+─────────────────────────────────────────────────────────────────────────────
+- Nếu bật flag followVerifiedUsers
+- Tự động follow từng verified user
+- Random delay giữa các lần follow (1.5-3 giây)
+- Cập nhật status và is_followed trong database
+
+================================================================================
+4. CÁC SELECTOR CHÍNH TRÊN X (TWITTER)
+================================================================================
+
+┌─────────────────────────────────────────────────────────────────────────────┐
+│ Selector                                    │ Mô tả                          │
+├─────────────────────────────────────────────────────────────────────────────┤
+│ article[data-testid="tweet"]                │ Toàn bộ tweet/reply            │
+│ [data-testid="User-Name"] a span span       │ Tên hiển thị                    │
+│ [data-testid="User-Name"] a[href*="/"]      │ Link đến profile               │
+│ [data-testid="icon-verified"]               │ Blue verified                   │
+│ [data-testid="icon-verified-gold"]          │ Gold verified (tổ chức)        │
+│ [data-testid="icon-verified-grey"]          │ Grey verified (chính phủ)      │
+│ [data-testid="tweetText"]                   │ Nội dung comment/tweet          │
+│ time                                        │ Thời gian                       │
+│ [data-testid="Tweet-User-Avatar"] img       │ Avatar                          │
+│ [data-testid="UserStats"]                   │ Thống kê (followers, following) │
+│ [data-testid="UserDescription"]             │ Bio                             │
+│ [data-testid="UserLocation"]                │ Vị trí                          │
+└─────────────────────────────────────────────────────────────────────────────┘
+
+================================================================================
+5. CÁC LOẠI VERIFIED TRÊN X
+================================================================================
+
+┌────────────┬─────────────────────────────────────────────────────────────────┐
+│ Loại       │ Mô tả                                                          │
+├────────────┼─────────────────────────────────────────────────────────────────┤
+│ 🔵 BLUE    │ X Premium (trả phí) - icon màu xanh                            │
+├────────────┼─────────────────────────────────────────────────────────────────┤
+│ 🟡 GOLD    │ Verified tổ chức (Organization) - icon màu vàng                │
+├────────────┼─────────────────────────────────────────────────────────────────┤
+│ ⚪ GREY    │ Verified chính phủ / đa phương - icon màu xám                  │
+└────────────┴─────────────────────────────────────────────────────────────────┘
+
+================================================================================
+6. CÁC THAM SỐ CẤU HÌNH
+================================================================================
+
+┌─────────────────────┬───────────┬───────────────────────────────────────────┐
+│ Tham số             │ Mặc định  │ Mô tả                                     │
+├─────────────────────┼───────────┼───────────────────────────────────────────┤
+│ maxComments         │ 50        │ Số lượng comments tối đa cần xử lý       │
+│ onlyVerified        │ true      │ Chỉ lấy user có verified                  │
+│ scrollToLoadComments│ true      │ Tự động scroll để load comments          │
+│ maxScrolls          │ 5         │ Số lần scroll tối đa                      │
+│ timeoutMs           │ 30000     │ Timeout cho mỗi operation (ms)            │
+│ followVerified      │ false     │ Tự động follow verified user              │
+└─────────────────────┴───────────┴───────────────────────────────────────────┘
+
+================================================================================
+7. COMMAND LINE OPTIONS MỚI
+================================================================================
+
+┌─────────────────────────┬───────────────────────────────────────────────────┐
+│ Option                  │ Mô tả                                             │
+├─────────────────────────┼───────────────────────────────────────────────────┤
+│ --read-comments         │ Bật tính năng đọc comments từ tweet              │
+│ --follow-verified-users │ Tự động follow các verified user trong comments  │
+│ --max-comments <number> │ Số lượng comments tối đa cần xử lý (mặc định 50)│
+└─────────────────────────┴───────────────────────────────────────────────────┘
+
+================================================================================
+8. CÁC LỆNH SỬ DỤNG MẪU
+================================================================================
+
+8.1. Đọc comments từ tweet cụ thể:
+─────────────────────────────────────────────────────────────────────────────
+npx tsx src/profile-launcher.ts profile_01_id https://x.com/username/status/123456789 --read-comments
+
+8.2. Đọc comments và tự động follow verified users:
+─────────────────────────────────────────────────────────────────────────────
+npx tsx src/profile-launcher.ts profile_01_id https://x.com/username/status/123456789 --read-comments --follow-verified-users
+
+8.3. Đọc comments với số lượng tối đa 100:
+─────────────────────────────────────────────────────────────────────────────
+npx tsx src/profile-launcher.ts profile_01_id https://x.com/username/status/123456789 --read-comments --max-comments 100
+
+8.4. Kết hợp nhiều tính năng (like, follow author, đọc comments):
+─────────────────────────────────────────────────────────────────────────────
+npx tsx src/profile-launcher.ts profile_01_id https://x.com/home --like-current-tweet --follow-author --read-comments --follow-verified-users
+
+8.5. Chỉ đọc comments từ tweet đang mở trong browser:
+─────────────────────────────────────────────────────────────────────────────
+npx tsx src/profile-launcher.ts profile_01_id https://x.com/home
+# Sau đó thao tác thủ công mở tweet, rồi chạy lệnh với --read-comments
+
+================================================================================
+9. CẤU TRÚC DỮ LIỆU ĐẦU RA (CommentUserInfo)
+================================================================================
+
+{
+  id: string;                    // User ID
+  username: string;              // Username (không có @)
+  displayName: string;           // Tên hiển thị
+  isVerified: boolean;           // Có verified không
+  isGoldVerified: boolean;       // Gold verified (tổ chức)
+  isGreyVerified: boolean;       // Grey verified (chính phủ)
+  followersCount: number;        // Số followers
+  followingCount: number;        // Số following
+  tweetCount: number;            // Số tweets
+  bio?: string;                  // Tiểu sử
+  location?: string;             // Vị trí
+  avatarUrl?: string;            // URL avatar
+  commentText: string;           // Nội dung comment
+  commentTimestamp: string;      // Thời gian comment
+  commentUrl: string;            // Link đến comment
+  isFollowing: boolean;          // Profile hiện tại có follow user này không?
+  status: 'pending' | 'followed' | 'skipped' | 'blocked';
+  upTime: Date;                  // Thời gian tạo record
+}
+
+================================================================================
+10. CÁC TRUY VẤN SQL HỮU ÍCH
+================================================================================
+
+10.1. Xem danh sách verified users đã lưu:
+─────────────────────────────────────────────────────────────────────────────
+SELECT username, display_name, followers_count, status, up_time 
+FROM comment_users 
+WHERE is_verified = 1 
+ORDER BY up_time DESC 
+LIMIT 20;
+
+10.2. Xem các user đã được follow:
+─────────────────────────────────────────────────────────────────────────────
+SELECT username, display_name, followed_at 
+FROM comment_users 
+WHERE is_followed = 1 
+ORDER BY followed_at DESC;
+
+10.3. Thống kê số lượng user theo trạng thái:
+─────────────────────────────────────────────────────────────────────────────
+SELECT status, COUNT(*) as count 
+FROM comment_users 
+GROUP BY status;
+
+10.4. Tìm user theo username:
+─────────────────────────────────────────────────────────────────────────────
+SELECT * FROM comment_users WHERE username LIKE '%keyword%';
+
+10.5. Xóa các user cũ (quá 30 ngày):
+─────────────────────────────────────────────────────────────────────────────
+DELETE FROM comment_users WHERE up_time < datetime('now', '-30 days');
+
+================================================================================
+11. HƯỚNG DẪN MỞ RỘNG
+================================================================================
+
+11.1. Thêm tính năng lấy comments có ảnh/video:
+─────────────────────────────────────────────────────────────────────────────
+Kiểm tra comment có chứa media không, lưu URL media vào cột media_urls
+
+11.2. Thêm tính năng lấy comment có URL:
+─────────────────────────────────────────────────────────────────────────────
+Phát hiện và lưu các URL được chia sẻ trong comment
+
+11.3. Thêm tính năng phân tích sentiment:
+─────────────────────────────────────────────────────────────────────────────
+Phân tích cảm xúc của comment (tích cực/tiêu cực/trung tính)
+
+11.4. Thêm tính năng gửi notification:
+─────────────────────────────────────────────────────────────────────────────
+Khi phát hiện verified user mới, gửi thông báo qua Telegram/Discord
+
+11.5. Thêm tính năng xuất report:
+─────────────────────────────────────────────────────────────────────────────
+Xuất danh sách verified users ra file CSV/Excel
+
+================================================================================
+12. LƯU Ý KHI PHÁT TRIỂN
+================================================================================
+
+⚠️ Giới hạn số lượng comments để tránh bị rate limit (khuyến nghị max 50-100)
+
+⚠️ Thêm random delay giữa các lần scroll để tránh bị phát hiện
+
+⚠️ Kiểm tra user đã được follow trước đó để tránh follow trùng lặp
+
+⚠️ Lưu cả user không verified nếu cần (có thể dùng cho mục đích phân tích)
+
+⚠️ Nên có cơ chế retry khi network error
+
+⚠️ Log đầy đủ thông tin để debug khi có lỗi
+
+================================================================================
+13. TÓM TẮT CÁC BƯỚC TRIỂN KHAI
+================================================================================
+
+Bước 1: Thêm table comment_users vào SQLite database
+Bước 2: Thêm interface CommentUserInfo và ReadTweetFollowOptions
+Bước 3: Implement hàm readTweetFollow() trong XActions
+Bước 4: Implement hàm saveCommentUsersToDatabase()
+Bước 5: Thêm command line options mới (--read-comments, --follow-verified-users, --max-comments)
+Bước 6: Cập nhật hàm runOptionalXActions để gọi tính năng mới
+Bước 7: Test với tweet có nhiều comments
+
+================================================================================
+14. VÍ DỤ OUTPUT KHI CHẠY THÀNH CÔNG
+================================================================================
+
+============================================================
+📖 READING TWEET COMMENTS & EXTRACTING VERIFIED USERS
+============================================================
+
+📍 Current tweet URL: https://x.com/username/status/123456789
+
+📜 Scrolling to load comments (max 5 scrolls)...
+   Scroll 1: Found 25 tweets/comments
+   Scroll 2: Found 48 tweets/comments
+   Scroll 3: Found 52 tweets/comments
+   No more comments to load
+
+🔍 Extracting comments (max 50)...
+
+📊 Found 12 verified users out of 52 total comments
+
+📋 EXTRACTED VERIFIED USERS:
+────────────────────────────────────────────────────────────
+1. @john_doe (John Doe) 🔵 BLUE
+   💬 Comment: Great post! Very informative...
+   👥 Followers: 15,234
+   📅 Time: 2026-01-03T10:30:00.000Z
+   🔗 https://x.com/john_doe/status/123456789
+
+2. @tech_company (Tech Corp) 🟡 GOLD
+   💬 Comment: We completely agree with this...
+   👥 Followers: 125,000
+   📅 Time: 2026-01-03T09:15:00.000Z
+   🔗 https://x.com/tech_company/status/123456789
+
+   ... and 10 more users
+
+👤 Auto-following verified users...
+   Following @john_doe...
+   ✅ Successfully followed @john_doe
+   Following @tech_company...
+   ✅ Successfully followed @tech_company
+
+💾 Saved 12 users to database
+
+============================================================
+✅ READ TWEET COMMENTS COMPLETED
+📊 Total verified users: 12
+👤 Followed: 12
+⏭️ Skipped: 0
+============================================================
+
+================================================================================
+END OF DOCUMENT
+================================================================================

@@ -1,0 +1,4 @@
+# Update these placeholders for your team.
+/tests/ @your-org/qa-team
+/src/pages/ @your-org/qa-team
+/playwright.config.ts @your-org/qa-team

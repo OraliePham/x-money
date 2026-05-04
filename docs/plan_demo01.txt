@@ -1,0 +1,435 @@
+================================================================================
+        PLAYWRIGHT STEALTH PROFILE MANAGER - KẾ HOẠCH PHÁT TRIỂN
+================================================================================
+Ngày tạo: 2026-01-03
+Phiên bản: 1.0.0
+Ngôn ngữ: TypeScript
+Framework: Playwright
+
+================================================================================
+I. TỔNG QUAN DỰ ÁN
+================================================================================
+
+Mục tiêu: Xây dựng hệ thống quản lý nhiều profile trình duyệt độc lập với khả 
+năng chống phát hiện bot tối đa, lưu trữ đầy đủ dữ liệu như Appdata thật.
+
+Yêu cầu cốt lõi:
+1. Mỗi profile có thư mục user_data riêng biệt (lưu cookies, cache, localStorage)
+2. Tự động sinh cấu hình fingerprint ngẫu nhiên nhưng thực tế
+3. Tích hợp các kỹ thuật anti-detection mạnh nhất
+4. Hỗ trợ chạy đồng thời nhiều profile
+5. Có khả năng export/import profile để backup
+
+================================================================================
+II. KIẾN TRÚC HỆ THỐNG
+================================================================================
+
+2.1. Cấu trúc thư mục dự kiến:
+================================================================================
+project-root/
+├── src/
+│   ├── stealth-profile-manager.ts    # Core class chính
+│   ├── index.ts                       # Entry point
+│   ├── test-detection.ts              # Test script
+│   └── utils/
+│       ├── human-behavior.ts          # Mô phỏng hành vi người
+│       ├── fingerprint-generator.ts   # Sinh fingerprint ngẫu nhiên
+│       └── proxy-manager.ts           # Quản lý proxy pool
+├── browser_profiles/                  # Thư mục lưu profile (auto-generated)
+│   ├── profile_01_id/
+│   │   ├── config.json
+│   │   └── user_data/
+│   └── profile_02_id/
+│       └── ...
+├── logs/                              # Log files
+├── backups/                           # Backup profiles
+├── package.json
+├── tsconfig.json
+└── .env                               # Environment variables (proxy, API keys)
+================================================================================
+
+2.2. Các class chính:
+================================================================================
+- StealthProfileManager: Quản lý tất cả profile (tạo, launch, đóng, xóa)
+- HumanBehavior: Mô phỏng hành vi giống người dùng thật
+- FingerprintGenerator: Tạo thông số fingerprint ngẫu nhiên
+- ProxyManager: Quản lý vòng đời proxy cho từng profile
+
+================================================================================
+III. CÁC KỸ THUẬT ANTI-DETECTION BẮT BUỘC
+================================================================================
+
+STT | Kỹ thuật | Mức độ | Ghi chú
+----|----------|--------|-------------------------
+1   | Xóa navigator.webdriver | CRITICAL | Phải có mặt ở mọi profile
+2   | Fake chrome.runtime object | CRITICAL | window.chrome phải tồn tại
+3   | Spoof WebGL vendor/renderer | HIGH | Dùng giá trị thật, không dùng SwiftShader
+4   | Spoof canvas fingerprint | HIGH | Thêm nhiễu ngẫu nhiên
+5   | Non-headless mode | CRITICAL | Tuyệt đối không dùng headless
+6   | Random delays giữa actions | HIGH | 500-3000ms ngẫu nhiên
+7   | Persistent context | CRITICAL | launchPersistentContext bắt buộc
+8   | Spoof plugins | MEDIUM | Thêm plugins giả
+9   | Spoof permissions API | MEDIUM | Query permissions phải trả về đúng
+10  | Spoof hardware stats | MEDIUM | CPU cores, RAM, platform
+11  | Disable automation flags | HIGH | arguments đầy đủ
+12  | Human-like mouse movement | MEDIUM | Dùng bezier curve
+
+================================================================================
+IV. CÁC BƯỚC PHÁT TRIỂN CHI TIẾT
+================================================================================
+
+Phase 1: Thiết lập project (Ngày 1)
+================================================================================
+[ ] Tạo thư mục project
+[ ] Chạy npm init -y
+[ ] Cài đặt dependencies: playwright, typescript, uuid, @types/node
+[ ] Tạo tsconfig.json với cấu hình chuẩn
+[ ] Tạo .gitignore (node_modules, dist, browser_profiles, logs, .env)
+
+Checklist Phase 1:
+☐ Có thể chạy npx tsc --version thành công
+☐ Playwright đã cài đủ browsers (chromium)
+☐ Cấu trúc thư mục đã tạo đầy đủ
+
+================================================================================
+Phase 2: Xây dựng core StealthProfileManager (Ngày 2-3)
+================================================================================
+[ ] Tạo class StealthProfileManager
+[ ] Implement hàm createProfile()
+    - Tạo ID duy nhất (profile_01_id format)
+    - Tạo thư mục user_data
+    - Sinh fingerprint ngẫu nhiên
+    - Lưu config.json
+[ ] Implement hàm launchProfile()
+    - Dùng launchPersistentContext
+    - Inject stealth script
+    - Random delay trước khi return
+[ ] Implement hàm listProfiles(), deleteProfile(), closeProfile()
+[ ] Implement hàm exportProfile(), importProfile()
+
+Yêu cầu Phase 2:
+☐ Mỗi profile có user_data riêng, không chia sẻ dữ liệu
+☐ Có thể launch 2 profile cùng lúc mà không conflict
+☐ Profile sau khi đóng phải lưu được session cho lần chạy sau
+
+================================================================================
+Phase 3: Xây dựng fingerprint generator (Ngày 4)
+================================================================================
+[ ] Tạo function generateRealisticFingerprint()
+    - Random user agent từ danh sách thật
+    - Random viewport (1920x1080, 1366x768, 1536x864, 1440x900)
+    - Random WebGL vendor/renderer (không dùng giá trị fake)
+    - Random hardwareConcurrency (4, 6, 8, 10, 12)
+    - Random deviceMemory (4, 8, 16)
+    - Set locale: vi-VN, timezone: Asia/Ho_Chi_Minh
+[ ] Đảm bảo fingerprint hợp lý (không có giá trị vô lý)
+
+Lưu ý Phase 3:
+☐ KHÔNG được dùng user agent cũ hơn 6 tháng
+☐ KHÔNG được dùng WebGL renderer là "Google SwiftShader" (dấu hiệu bot)
+☐ platform phải match với user agent
+
+================================================================================
+Phase 4: Xây dựng stealth injection script (Ngày 5-6)
+================================================================================
+[ ] Viết script injection hoàn chỉnh
+[ ] Test từng function riêng lẻ
+[ ] Đảm bảo không crash trang web
+[ ] Thêm error handling cho script
+
+Các thành phần bắt buộc trong script:
+☐ Xóa webdriver flag
+☐ Fake chrome.runtime với đầy đủ methods
+☐ Spoof permissions query
+☐ Spoof plugins array
+☐ Spoof languages (vi-VN, vi, en-US, en)
+☐ Spoof hardware (hardwareConcurrency, deviceMemory, platform)
+☐ Spoof WebGL getParameter
+☐ Spoof canvas toDataURL
+☐ Spoof screen resolution
+
+================================================================================
+Phase 5: Xây dựng Human Behavior simulation (Ngày 7)
+================================================================================
+[ ] humanMouseMove() - di chuyển chuột theo bezier curve
+[ ] humanType() - gõ chữ với delay ngẫu nhiên (30-100ms/char)
+[ ] humanScroll() - scroll với tốc độ thay đổi
+[ ] randomDelay() - delay ngẫu nhiên giữa các actions
+[ ] randomViewportChange() - thay đổi kích thước cửa sổ (optional)
+
+Yêu cầu Phase 5:
+☐ Mouse movement phải có acceleration/deceleration
+☐ Typing speed phải thay đổi ngẫu nhiên
+☐ Delay không được theo pattern cố định
+
+================================================================================
+Phase 6: Tích hợp proxy (Ngày 8)
+================================================================================
+[ ] Tạo interface cho ProxyConfig
+[ ] Thêm proxy option vào createProfile()
+[ ] Thêm proxy vào launchProfile()
+[ ] Tạo ProxyManager class để xoay vòng proxy
+
+Lưu ý proxy:
+☐ Không dùng free proxy (dễ bị block)
+☐ Nên dùng residential proxy cho các trang khó tính
+☐ Mỗi profile nên có proxy riêng nếu cần ẩn IP
+
+================================================================================
+Phase 7: Test và validation (Ngày 9-10)
+================================================================================
+[ ] Tạo test script kiểm tra từng anti-detection technique
+[ ] Test trên bot.sannysoft.com
+[ ] Test trên fingerprint.com/demo
+[ ] Test trên recaptcha-demo.appspot.com
+[ ] Test chạy đồng thời 10 profiles
+[ ] Test memory usage và performance
+
+Các test bắt buộc:
+☐ Webdriver flag = undefined
+☐ Chrome runtime tồn tại
+☐ WebGL không phải SwiftShader
+☐ Plugins length > 0
+☐ Languages bao gồm vi-VN
+☐ Hardware concurrency > 2
+☐ Canvas fingerprint có nhiễu
+
+================================================================================
+V. CÁC FILE CODE CẦN TẠO
+================================================================================
+
+File 1: src/stealth-profile-manager.ts (Khoảng 500 dòng)
+--------------------------------------------------------
+- Import các dependencies
+- Định nghĩa interfaces (ProfileConfig, Fingerprint, ProxyConfig)
+- Class StealthProfileManager với đầy đủ methods
+- Hàm generateRealisticFingerprint()
+- Hàm getAdvancedStealthScript()
+- Hàm main() để test
+
+File 2: src/human-behavior.ts (Khoảng 150 dòng)
+------------------------------------------------
+- Export class HumanBehavior
+- humanMouseMove(): di chuyển chuột tự nhiên
+- humanType(): gõ chữ giống người
+- humanScroll(): scroll tự nhiên
+- randomDelay(): delay ngẫu nhiên
+- Tất cả đều async, nhận page làm parameter
+
+File 3: src/test-detection.ts (Khoảng 100 dòng)
+------------------------------------------------
+- Import StealthProfileManager
+- Tạo profile test
+- Chạy qua các trang detection
+- Log kết quả từng test
+- Chụp screenshot để kiểm tra visual
+- Tính điểm tổng hợp (%)
+
+File 4: src/index.ts (Khoảng 30 dòng)
+--------------------------------------
+- Entry point đơn giản
+- Import manager và human behavior
+- Quick start example
+
+File 5: package.json
+--------------------
+- Scripts: start, dev, build, test
+- Dependencies: playwright, typescript, ts-node, uuid
+- DevDependencies: @types/node, @types/uuid
+
+File 6: .env.example
+--------------------
+PROXY_SERVER=http://proxy.example.com:8080
+PROXY_USERNAME=your_username
+PROXY_PASSWORD=your_password
+MAX_CONCURRENT_PROFILES=5
+
+================================================================================
+VI. CÁC LƯU Ý QUAN TRỌNG KHI PHÁT TRIỂN
+================================================================================
+
+6.1. Lưu ý về anti-detection:
+================================================================================
+⚠️ KHÔNG sử dụng headless mode - 95% bot bị phát hiện qua headless
+⚠️ KHÔNG dùng user agent mặc định của Playwright
+⚠️ KHÔNG dùng WebGL renderer là SwiftShader (dấu hiệu của phần mềm ảo)
+⚠️ KHÔNG để actions quá nhanh - phải có random delay
+⚠️ KHÔNG dùng cùng một fingerprint cho nhiều profile
+
+6.2. Lưu ý về performance:
+================================================================================
+⚠️ Mỗi profile tiêu tốn 200-400MB RAM
+⚠️ Chạy 10 profile cần ít nhất 8GB RAM
+⚠️ CPU usage tăng đáng kể khi nhiều profile cùng tải trang
+⚠️ Nên giới hạn concurrent profiles (5-10 tùy cấu hình máy)
+
+6.3. Lưu ý về storage:
+================================================================================
+⚠️ Mỗi profile sau 1 tháng sử dụng có thể tốn 500MB-2GB
+⚠️ Nên có cron job dọn dẹp profile cũ
+⚠️ Backup profile quan trọng thường xuyên
+⚠️ Không lưu profile trên ổ đĩa có dung lượng thấp
+
+6.4. Lưu ý về bảo mật:
+================================================================================
+⚠️ Không commit file .env lên git
+⚠️ Không log proxy password
+⚠️ Profile user_data có thể chứa session token - cần bảo vệ
+⚠️ Nên mã hóa config.json nếu chứa thông tin nhạy cảm
+
+6.5. Lưu ý về debugging:
+================================================================================
+⚠️ Luôn log profile ID khi có lỗi để dễ trace
+⚠️ Lưu stack trace đầy đủ khi crash
+⚠️ Dùng screenshot tự động khi có lỗi để debug sau
+⚠️ Ghi log thời gian thực của mỗi action
+
+================================================================================
+VII. CÁC RỦI RO VÀ GIẢI PHÁP
+================================================================================
+
+Rủi ro 1: Bị phát hiện dù đã áp dụng các kỹ thuật
+------------------------------------------------
+Nguyên nhân: Các trang web cập nhật phương thức phát hiện mới
+Giải pháp: 
+- Cập nhật stealth script thường xuyên
+- Theo dõi các repo anti-detection (puppeteer-extra-stealth)
+- Test định kỳ trên các trang detection
+
+Rủi ro 2: Memory leak khi chạy nhiều profile
+------------------------------------------------
+Nguyên nhân: Không đóng context đúng cách
+Giải pháp:
+- Luôn gọi await context.close() sau khi dùng xong
+- Dùng weakmap để theo dõi active contexts
+- Set timeout tự động đóng profile không hoạt động
+
+Rủi ro 3: Profile bị corrupt không load được
+------------------------------------------------
+Nguyên nhân: Tắt browser đột ngột hoặc lỗi disk
+Giải pháp:
+- Tự động backup profile mỗi ngày
+- Implement recovery mechanism
+- Log chi tiết lỗi để debug
+
+Rủi ro 4: Bị rate limit bởi target website
+------------------------------------------------
+Nguyên nhân: Quá nhiều request từ cùng IP
+Giải pháp:
+- Dùng proxy pool xoay vòng
+- Random delay giữa các request
+- Implement exponential backoff khi bị block
+
+================================================================================
+VIII. TEST CHECKLIST (PHẢI ĐẠT TRƯỚC KHI DEPLOY)
+================================================================================
+
+☐ Tạo được profile với ID tùy chỉnh (profile_01_id format)
+☐ Mỗi profile lưu đúng thư mục user_data riêng
+☐ Launch profile thành công và hiển thị giao diện
+☐ Đăng nhập website, đóng browser, mở lại vẫn giữ session
+☐ navigator.webdriver = undefined
+☐ window.chrome.runtime tồn tại
+☐ WebGL vendor không phải Google SwiftShader
+☐ Canvas fingerprint khác nhau giữa các profile
+☐ Chạy đồng thời 5 profiles không crash
+☐ Đóng profile giải phóng đúng tài nguyên
+☐ Export profile ra file zip được
+☐ Import profile từ backup hoạt động
+☐ Test trên bot.sannysoft.com pass >80%
+☐ Test trên fingerprint.com không bị phát hiện
+☐ Proxy hoạt động với authentication
+
+================================================================================
+IX. DEPLOYMENT CHECKLIST
+================================================================================
+
+Trước khi deploy lên production:
+☐ Chạy test-detection.ts và đạt score >85%
+☐ Kiểm tra memory usage không tăng đột biến
+☐ Tắt debug log trong production (chỉ log error)
+☐ Cấu hình log rotation để tránh đầy disk
+☐ Set timeout cho tất cả network requests
+☐ Cấu hình backup tự động mỗi ngày
+☐ Document các API endpoints nếu có
+☐ Setup monitoring cho số lượng profile đang chạy
+
+================================================================================
+X. CÁC CÂU HỎI MỞ RỘNG CẦN TRẢ LỜI TRONG QUÁ TRÌNH PHÁT TRIỂN
+================================================================================
+
+1. Làm thế nào để xoay vòng User-Agent tự động mỗi lần chạy profile?
+2. Có nên implement auto-update fingerprint sau mỗi 24h không?
+3. Làm sao để bypass được Cloudflare Turnstile?
+4. Có thể dùng Docker để isolate từng profile không?
+5. Làm thế nào để giảm memory footprint khi chạy 100+ profiles?
+6. Có cách nào để share cookies giữa các profiles không?
+7. Làm sao để tự động giải reCAPTCHA?
+8. Có nên dùng GPU acceleration cho WebGL spoofing không?
+9. Làm thế nào để phát hiện khi nào profile bị shadow banned?
+10. Có tool nào để monitor health của từng profile không?
+
+================================================================================
+XI. TÀI NGUYÊN THAM KHẢO
+================================================================================
+
+Documentation:
+- Playwright Official Docs: https://playwright.dev/docs/api/class-browser
+- Puppeteer Extra Stealth: https://github.com/berstend/puppeteer-extra/tree/master/packages/puppeteer-extra-plugin-stealth
+- FingerprintJS: https://github.com/fingerprintjs/fingerprintjs
+
+Các trang test detection:
+- https://bot.sannysoft.com/
+- https://fingerprint.com/demo/
+- https://deviceandbrowserinfo.com/areyouahuman
+- https://recaptcha-demo.appspot.com/
+
+Các kỹ thuật tham khảo:
+- WebGL Spoofing: Sử dụng ANGLE renderer thay vì SwiftShader
+- Canvas Fingerprinting: Thêm noise với random pixels
+- Mouse Movement: Simulate bézier curves với acceleration/deceleration
+
+================================================================================
+XII. LIÊN HỆ & HỖ TRỢ
+================================================================================
+
+Khi gặp lỗi, cần log đầy đủ các thông tin:
+- Profile ID
+- Fingerprint đang dùng
+- Target URL
+- Stack trace
+- Playwright version
+- OS version
+
+Các kênh hỗ trợ:
+- Playwright Discord: #playwright channel
+- Stack Overflow: tag #playwright #stealth
+- GitHub Issues: playwright-dev/playwright
+
+================================================================================
+XIII. VERSION HISTORY
+================================================================================
+
+v1.0.0 (2026-01-03)
+- Initial planning
+- Xác định kiến trúc core
+- List các kỹ thuật anti-detection cần có
+- Outline các phase phát triển
+
+================================================================================
+XIV. KẾT LUẬN
+================================================================================
+
+Dự án này yêu cầu sự tỉ mỉ trong việc implement các kỹ thuật anti-detection.
+Quan trọng nhất là:
+1. LUÔN dùng persistent context (không dùng temporary)
+2. LUÔN dùng non-headless mode
+3. LUÔN inject stealth script đầy đủ
+4. LUÔN có random delays
+5. LUÔN test trên các trang detection trước khi deploy
+
+Chúc quá trình phát triển thành công! 🚀
+
+================================================================================
+END OF DOCUMENT
+================================================================================

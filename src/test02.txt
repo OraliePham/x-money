@@ -1,0 +1,918 @@
+```text
+================================================================================
+                    PLAYWRIGHT PROFILE MANAGER - COMPLETE IMPLEMENTATION
+                    ========================================================
+                    Language: TypeScript
+                    Framework: Playwright
+                    Purpose: Local testing with full anti-detection
+================================================================================
+
+================================================================================
+FILE 1: package.json
+================================================================================
+
+{
+  "name": "playwright-profile-manager",
+  "version": "1.0.0",
+  "description": "Multi-profile browser manager with anti-detection for local testing",
+  "main": "dist/index.js",
+  "scripts": {
+    "start": "ts-node src/index.ts",
+    "test": "ts-node src/test-stealth.ts",
+    "build": "tsc",
+    "clean": "rm -rf dist browser_profiles",
+    "dev": "ts-node src/index.ts"
+  },
+  "dependencies": {
+    "playwright": "^1.40.0"
+  },
+  "devDependencies": {
+    "@types/node": "^20.10.0",
+    "typescript": "^5.3.0",
+    "ts-node": "^10.9.0"
+  },
+  "keywords": ["playwright", "profile", "browser", "automation", "testing"],
+  "author": "Developer",
+  "license": "MIT"
+}
+
+================================================================================
+FILE 2: tsconfig.json
+================================================================================
+
+{
+  "compilerOptions": {
+    "target": "ES2020",
+    "module": "commonjs",
+    "lib": ["ES2020", "DOM"],
+    "outDir": "./dist",
+    "rootDir": "./src",
+    "strict": true,
+    "esModuleInterop": true,
+    "skipLibCheck": true,
+    "forceConsistentCasingInFileNames": true,
+    "resolveJsonModule": true,
+    "declaration": true,
+    "declarationMap": true
+  },
+  "include": ["src/**/*"],
+  "exclude": ["node_modules", "dist", "browser_profiles"]
+}
+
+================================================================================
+FILE 3: src/ProfileManager.ts
+================================================================================
+
+import { chromium, BrowserContext, Page } from 'playwright';
+import * as fs from 'fs';
+import * as path from 'path';
+import { randomUUID } from 'crypto';
+
+export interface Fingerprint {
+  userAgent: string;
+  viewport: { width: number; height: number };
+  locale: string;
+  timezone: string;
+  platform: string;
+  hardwareConcurrency: number;
+  deviceMemory: number;
+  languages: string[];
+  webglVendor: string;
+  webglRenderer: string;
+}
+
+export interface ProfileConfig {
+  id: string;
+  name: string;
+  userDataDir: string;
+  createdAt: string;
+  lastUsed: string;
+  fingerprint: Fingerprint;
+}
+
+export class ProfileManager {
+  private basePath: string;
+  private activeContexts: Map<string, BrowserContext> = new Map();
+
+  constructor(basePath: string = './browser_profiles') {
+    this.basePath = basePath;
+    if (!fs.existsSync(basePath)) {
+      fs.mkdirSync(basePath, { recursive: true });
+    }
+  }
+
+  private generateFingerprint(): Fingerprint {
+    const userAgents = [
+      'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+      'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+      'Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+      'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/119.0.0.0 Safari/537.36',
+      'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/119.0.0.0 Safari/537.36'
+    ];
+    
+    const webglVendors = [
+      'Intel Inc.',
+      'NVIDIA Corporation',
+      'Google Inc. (Intel)',
+      'Advanced Micro Devices, Inc.'
+    ];
+    
+    const webglRenderers = [
+      'ANGLE (Intel, Intel(R) UHD Graphics 620 Direct3D11 vs_5_0 ps_5_0)',
+      'ANGLE (NVIDIA, NVIDIA GeForce GTX 1060 Direct3D11 vs_5_0 ps_5_0)',
+      'ANGLE (AMD, AMD Radeon RX 580 Direct3D11 vs_5_0 ps_5_0)',
+      'ANGLE (Intel, Intel(R) Iris(R) Xe Graphics Direct3D11 vs_5_0 ps_5_0)'
+    ];
+    
+    const platforms = ['Win32', 'Win64', 'MacIntel', 'Linux x86_64'];
+    const hardwareOptions = [4, 6, 8, 10, 12];
+    const memoryOptions = [4, 8, 16];
+
+    return {
+      userAgent: userAgents[Math.floor(Math.random() * userAgents.length)],
+      viewport: { width: 1920, height: 1080 },
+      locale: 'vi-VN',
+      timezone: 'Asia/Ho_Chi_Minh',
+      platform: platforms[Math.floor(Math.random() * platforms.length)],
+      hardwareConcurrency: hardwareOptions[Math.floor(Math.random() * hardwareOptions.length)],
+      deviceMemory: memoryOptions[Math.floor(Math.random() * memoryOptions.length)],
+      languages: ['vi-VN', 'vi', 'en-US', 'en'],
+      webglVendor: webglVendors[Math.floor(Math.random() * webglVendors.length)],
+      webglRenderer: webglRenderers[Math.floor(Math.random() * webglRenderers.length)]
+    };
+  }
+
+  private getStealthScript(fingerprint: Fingerprint): string {
+    return `
+      (function() {
+        // 1. Remove webdriver flag
+        Object.defineProperty(navigator, 'webdriver', { get: () => undefined });
+        delete navigator.__proto__.webdriver;
+        
+        // 2. Fake chrome.runtime object
+        window.chrome = {
+          runtime: {
+            connect: () => ({ onMessage: { addListener: () => {} }, disconnect: () => {} }),
+            sendMessage: () => {},
+            onMessage: { addListener: () => {} },
+            onConnect: { addListener: () => {} },
+            id: '${randomUUID()}'
+          },
+          loadTimes: () => ({
+            commitLoadTime: Date.now() / 1000,
+            startLoadTime: Date.now() / 1000 - 0.5,
+            finishDocumentLoadTime: Date.now() / 1000,
+            finishLoadTime: Date.now() / 1000,
+            navigationType: 'Reload'
+          }),
+          csi: () => ({
+            startE: Date.now(),
+            onloadT: Date.now(),
+            pageT: Date.now() - 100
+          }),
+          app: {
+            isInstalled: false,
+            InstallState: { DISABLED: 'disabled', INSTALLED: 'installed' },
+            RunningState: { CANNOT_RUN: 'cannot_run', READY_TO_RUN: 'ready_to_run' }
+          }
+        };
+        
+        // 3. Spoof permissions API
+        const originalQuery = window.navigator.permissions.query;
+        window.navigator.permissions.query = (parameters) => {
+          if (parameters.name === 'notifications') {
+            return Promise.resolve({ state: Notification.permission, onchange: null });
+          }
+          return originalQuery(parameters);
+        };
+        
+        // 4. Spoof plugins
+        const pluginArray = [
+          { name: 'Chrome PDF Plugin', filename: 'internal-pdf-viewer', description: 'Portable Document Format' },
+          { name: 'Chrome PDF Viewer', filename: 'mhjfbmdgcfjbbpaeojofohoefgiehjai', description: '' },
+          { name: 'Native Client', filename: 'internal-nacl-plugin', description: '' }
+        ];
+        
+        Object.defineProperty(navigator, 'plugins', {
+          get: () => {
+            const plugins = pluginArray.map(p => ({
+              ...p,
+              item: (i) => plugins[i],
+              namedItem: (name) => plugins.find(p => p.name === name)
+            }));
+            plugins.length = pluginArray.length;
+            return plugins;
+          }
+        });
+        
+        // 5. Spoof languages
+        Object.defineProperty(navigator, 'languages', {
+          get: () => ${JSON.stringify(fingerprint.languages)}
+        });
+        
+        // 6. Spoof hardware concurrency
+        Object.defineProperty(navigator, 'hardwareConcurrency', {
+          get: () => ${fingerprint.hardwareConcurrency}
+        });
+        
+        // 7. Spoof device memory
+        Object.defineProperty(navigator, 'deviceMemory', {
+          get: () => ${fingerprint.deviceMemory}
+        });
+        
+        // 8. Spoof platform
+        Object.defineProperty(navigator, 'platform', {
+          get: () => '${fingerprint.platform}'
+        });
+        
+        // 9. Spoof max touch points
+        Object.defineProperty(navigator, 'maxTouchPoints', {
+          get: () => 0
+        });
+        
+        // 10. Spoof WebGL vendor and renderer
+        const getParameter = WebGLRenderingContext.prototype.getParameter;
+        WebGLRenderingContext.prototype.getParameter = function(parameter) {
+          if (parameter === 37445) {
+            return '${fingerprint.webglVendor}';
+          }
+          if (parameter === 37446) {
+            return '${fingerprint.webglRenderer}';
+          }
+          return getParameter(parameter);
+        };
+        
+        // 11. Spoof canvas fingerprint with noise
+        const originalToDataURL = HTMLCanvasElement.prototype.toDataURL;
+        HTMLCanvasElement.prototype.toDataURL = function(type, quality) {
+          if (type === 'image/png' && (this.width === 224 || this.width === 300)) {
+            const context = this.getContext('2d');
+            if (context) {
+              const noise = '#' + Math.floor(Math.random() * 16777215).toString(16);
+              context.fillStyle = noise;
+              context.fillRect(0, 0, this.width, this.height);
+            }
+          }
+          return originalToDataURL.apply(this, [type, quality]);
+        };
+        
+        // 12. Hide automation from console
+        const consoleMethods = ['log', 'info', 'warn', 'error', 'debug'];
+        consoleMethods.forEach(method => {
+          const original = console[method];
+          console[method] = function() {
+            const args = Array.from(arguments);
+            if (args[0] !== 'headless-detect' && !args[0]?.includes('puppeteer') && !args[0]?.includes('playwright')) {
+              original.apply(console, args);
+            }
+          };
+        });
+        
+        console.log('✅ Stealth mode fully activated');
+      })();
+    `;
+  }
+
+  async createProfile(customId?: string): Promise<ProfileConfig> {
+    const id = customId || `profile_${randomUUID().slice(0, 8)}`;
+    const userDataDir = path.join(this.basePath, id, 'user_data');
+    
+    if (fs.existsSync(userDataDir)) {
+      throw new Error(`Profile with ID ${id} already exists`);
+    }
+    
+    fs.mkdirSync(userDataDir, { recursive: true });
+
+    const config: ProfileConfig = {
+      id: id,
+      name: `Profile_${id}`,
+      userDataDir: userDataDir,
+      createdAt: new Date().toISOString(),
+      lastUsed: new Date().toISOString(),
+      fingerprint: this.generateFingerprint()
+    };
+
+    const configPath = path.join(this.basePath, id, 'config.json');
+    fs.writeFileSync(configPath, JSON.stringify(config, null, 2));
+    
+    console.log(`✅ Created profile: ${id}`);
+    console.log(`   📁 Path: ${userDataDir}`);
+    console.log(`   🎯 User Agent: ${config.fingerprint.userAgent.slice(0, 60)}...`);
+    
+    return config;
+  }
+
+  async launchProfile(profileId: string): Promise<{ context: BrowserContext; page: Page }> {
+    const configPath = path.join(this.basePath, profileId, 'config.json');
+    
+    if (!fs.existsSync(configPath)) {
+      throw new Error(`Profile ${profileId} not found. Use createProfile() first.`);
+    }
+
+    const config: ProfileConfig = JSON.parse(fs.readFileSync(configPath, 'utf-8'));
+    config.lastUsed = new Date().toISOString();
+    fs.writeFileSync(configPath, JSON.stringify(config, null, 2));
+
+    console.log(`\n🚀 Launching profile: ${profileId}`);
+    console.log(`   📂 User data: ${config.userDataDir}`);
+
+    const context = await chromium.launchPersistentContext(config.userDataDir, {
+      headless: false,
+      viewport: config.fingerprint.viewport,
+      userAgent: config.fingerprint.userAgent,
+      locale: config.fingerprint.locale,
+      timezoneId: config.fingerprint.timezone,
+      args: [
+        '--disable-blink-features=AutomationControlled',
+        '--disable-features=ChromeWhatsNewUI,TranslateUI,OptimizationHints',
+        '--disable-component-extensions-with-background-pages',
+        '--disable-default-apps',
+        '--disable-extensions',
+        '--disable-ipc-flooding-protection',
+        '--disable-popup-blocking',
+        '--disable-prompt-on-repost',
+        '--disable-renderer-backgrounding',
+        '--disable-sync',
+        '--no-first-run',
+        '--no-sandbox',
+        '--disable-dev-shm-usage',
+        '--disable-background-timer-throttling',
+        '--disable-backgrounding-occluded-windows',
+        '--disable-breakpad',
+        '--disable-component-update',
+        '--disable-domain-reliability',
+        '--disable-features=AudioServiceOutOfProcess',
+        '--disable-hang-monitor',
+        '--disable-print-preview',
+        '--disable-speech-api',
+        '--allow-running-insecure-content',
+        `--window-size=${config.fingerprint.viewport.width},${config.fingerprint.viewport.height}`,
+        '--start-maximized',
+        '--disable-notifications'
+      ],
+      ignoreHTTPSErrors: true,
+      timeout: 60000
+    });
+
+    await context.addInitScript(this.getStealthScript(config.fingerprint));
+    
+    const page = await context.newPage();
+    
+    // Random delay to avoid detection patterns
+    const delay = Math.random() * 1000 + 500;
+    await page.waitForTimeout(delay);
+    
+    this.activeContexts.set(profileId, context);
+    
+    // Verify stealth mode
+    const webdriverFlag = await page.evaluate(() => (navigator as any).webdriver);
+    if (webdriverFlag === undefined) {
+      console.log(`   ✅ Stealth mode active`);
+    } else {
+      console.warn(`   ⚠️ Warning: webdriver flag still visible`);
+    }
+    
+    return { context, page };
+  }
+
+  async closeProfile(profileId: string): Promise<void> {
+    const context = this.activeContexts.get(profileId);
+    if (context) {
+      await context.close();
+      this.activeContexts.delete(profileId);
+      console.log(`🔒 Closed profile: ${profileId}`);
+    }
+  }
+
+  async closeAll(): Promise<void> {
+    console.log(`\n🔒 Closing all active profiles...`);
+    const promises = Array.from(this.activeContexts.keys()).map(id => this.closeProfile(id));
+    await Promise.all(promises);
+    console.log(`✅ All profiles closed`);
+  }
+
+  listProfiles(): ProfileConfig[] {
+    const profiles: ProfileConfig[] = [];
+    const dirs = fs.readdirSync(this.basePath);
+    
+    for (const dir of dirs) {
+      const configPath = path.join(this.basePath, dir, 'config.json');
+      if (fs.existsSync(configPath)) {
+        try {
+          const config = JSON.parse(fs.readFileSync(configPath, 'utf-8'));
+          profiles.push(config);
+        } catch (error) {
+          console.warn(`⚠️ Failed to read profile ${dir}:`, error);
+        }
+      }
+    }
+    
+    return profiles;
+  }
+
+  getProfile(profileId: string): ProfileConfig | null {
+    const configPath = path.join(this.basePath, profileId, 'config.json');
+    if (fs.existsSync(configPath)) {
+      return JSON.parse(fs.readFileSync(configPath, 'utf-8'));
+    }
+    return null;
+  }
+
+  async deleteProfile(profileId: string, force: boolean = false): Promise<void> {
+    if (this.activeContexts.has(profileId) && !force) {
+      throw new Error(`Profile ${profileId} is running. Close it first or use force=true`);
+    }
+    
+    await this.closeProfile(profileId);
+    
+    const profilePath = path.join(this.basePath, profileId);
+    if (fs.existsSync(profilePath)) {
+      fs.rmSync(profilePath, { recursive: true, force: true });
+      console.log(`🗑️ Deleted profile: ${profileId}`);
+    }
+  }
+
+  isProfileRunning(profileId: string): boolean {
+    return this.activeContexts.has(profileId);
+  }
+
+  getActiveProfilesCount(): number {
+    return this.activeContexts.size;
+  }
+}
+
+================================================================================
+FILE 4: src/HumanBehavior.ts
+================================================================================
+
+import { Page } from 'playwright';
+
+export class HumanBehavior {
+  private static bezierCurve(t: number, p0: number, p1: number, p2: number, p3: number): number {
+    const mt = 1 - t;
+    return mt * mt * mt * p0 + 3 * mt * mt * t * p1 + 3 * mt * t * t * p2 + t * t * t * p3;
+  }
+
+  static async mouseMove(page: Page, targetX: number, targetY: number): Promise<void> {
+    const start = await page.mouse.getPosition();
+    const steps = 40 + Math.floor(Math.random() * 40);
+    
+    // Control points for natural curve
+    const cp1x = start.x + (targetX - start.x) * 0.3 + (Math.random() - 0.5) * 50;
+    const cp1y = start.y + (targetY - start.y) * 0.3 + (Math.random() - 0.5) * 50;
+    const cp2x = start.x + (targetX - start.x) * 0.7 + (Math.random() - 0.5) * 50;
+    const cp2y = start.y + (targetY - start.y) * 0.7 + (Math.random() - 0.5) * 50;
+    
+    for (let i = 0; i <= steps; i++) {
+      const t = i / steps;
+      const x = this.bezierCurve(t, start.x, cp1x, cp2x, targetX);
+      const y = this.bezierCurve(t, start.y, cp1y, cp2y, targetY);
+      await page.mouse.move(x, y);
+      await page.waitForTimeout(Math.random() * 8 + 3);
+    }
+  }
+
+  static async type(page: Page, selector: string, text: string): Promise<void> {
+    await page.click(selector);
+    await page.waitForTimeout(Math.random() * 200 + 100);
+    
+    for (const char of text) {
+      await page.keyboard.type(char);
+      const delay = Math.random() * 80 + 40 + (char === ' ' ? 20 : 0);
+      await page.waitForTimeout(delay);
+    }
+  }
+
+  static async scroll(page: Page, distance: number): Promise<void> {
+    const steps = 20 + Math.floor(Math.random() * 15);
+    const stepDistance = distance / steps;
+    let remaining = distance;
+    
+    for (let i = 0; i < steps && remaining > 0; i++) {
+      const step = Math.min(stepDistance + (Math.random() - 0.5) * 20, remaining);
+      await page.mouse.wheel(0, step);
+      remaining -= step;
+      await page.waitForTimeout(Math.random() * 50 + 25);
+    }
+  }
+
+  static async scrollToElement(page: Page, selector: string): Promise<void> {
+    const element = await page.$(selector);
+    if (element) {
+      const boundingBox = await element.boundingBox();
+      if (boundingBox) {
+        await this.scroll(page, boundingBox.y);
+        await this.delay(500, 1000);
+      }
+    }
+  }
+
+  static async delay(minMs: number = 500, maxMs: number = 2000): Promise<void> {
+    const delay = Math.random() * (maxMs - minMs) + minMs;
+    await new Promise(resolve => setTimeout(resolve, delay));
+  }
+
+  static async randomMouseMovement(page: Page): Promise<void> {
+    const viewport = page.viewportSize();
+    if (viewport) {
+      const x = Math.random() * viewport.width;
+      const y = Math.random() * viewport.height;
+      await this.mouseMove(page, x, y);
+    }
+  }
+
+  static async clickLikeHuman(page: Page, selector: string): Promise<void> {
+    const element = await page.$(selector);
+    if (element) {
+      const boundingBox = await element.boundingBox();
+      if (boundingBox) {
+        const offsetX = boundingBox.width * (0.3 + Math.random() * 0.4);
+        const offsetY = boundingBox.height * (0.3 + Math.random() * 0.4);
+        await this.mouseMove(page, boundingBox.x + offsetX, boundingBox.y + offsetY);
+        await this.delay(100, 300);
+        await page.mouse.click(boundingBox.x + offsetX, boundingBox.y + offsetY);
+      }
+    }
+  }
+}
+
+================================================================================
+FILE 5: src/ConcurrentRunner.ts
+================================================================================
+
+import { ProfileManager } from './ProfileManager';
+import { Page } from 'playwright';
+
+interface TaskResult {
+  profileId: string;
+  success: boolean;
+  error?: string;
+  duration: number;
+}
+
+export class ConcurrentRunner {
+  private manager: ProfileManager;
+  private maxConcurrent: number;
+  private results: TaskResult[] = [];
+
+  constructor(maxConcurrent: number = 5) {
+    if (maxConcurrent < 1) {
+      throw new Error('maxConcurrent must be at least 1');
+    }
+    this.manager = new ProfileManager();
+    this.maxConcurrent = maxConcurrent;
+  }
+
+  async runProfiles(
+    profileIds: string[], 
+    task: (page: Page, profileId: string) => Promise<void>
+  ): Promise<TaskResult[]> {
+    this.results = [];
+    const running: Promise<void>[] = [];
+    const profileMap = new Map<string, number>();
+
+    console.log(`\n🚀 Running ${profileIds.length} profiles with concurrency ${this.maxConcurrent}`);
+    
+    for (const id of profileIds) {
+      // Wait if at max concurrency
+      if (running.length >= this.maxConcurrent) {
+        await Promise.race(running);
+        // Remove completed promises
+        const index = running.findIndex(p => p === Promise.race(running));
+        if (index !== -1) running.splice(index, 1);
+      }
+      
+      const promise = this.runSingleProfile(id, task);
+      running.push(promise);
+    }
+    
+    await Promise.all(running);
+    
+    return this.results;
+  }
+
+  private async runSingleProfile(
+    profileId: string, 
+    task: (page: Page, profileId: string) => Promise<void>
+  ): Promise<void> {
+    const startTime = Date.now();
+    let context;
+    let page;
+    
+    try {
+      ({ context, page } = await this.manager.launchProfile(profileId));
+      await task(page, profileId);
+      
+      this.results.push({
+        profileId,
+        success: true,
+        duration: Date.now() - startTime
+      });
+      
+      console.log(`✅ Profile ${profileId} completed in ${Date.now() - startTime}ms`);
+    } catch (error) {
+      console.error(`❌ Profile ${profileId} failed:`, error);
+      this.results.push({
+        profileId,
+        success: false,
+        error: error instanceof Error ? error.message : String(error),
+        duration: Date.now() - startTime
+      });
+    } finally {
+      if (context) {
+        await this.manager.closeProfile(profileId);
+      }
+    }
+  }
+
+  async runWithLimit<T>(
+    profileId: string,
+    task: (page: Page) => Promise<T>
+  ): Promise<T> {
+    const { context, page } = await this.manager.launchProfile(profileId);
+    try {
+      return await task(page);
+    } finally {
+      await this.manager.closeProfile(profileId);
+    }
+  }
+
+  getResults(): TaskResult[] {
+    return [...this.results];
+  }
+
+  getSuccessRate(): number {
+    if (this.results.length === 0) return 0;
+    const successes = this.results.filter(r => r.success).length;
+    return (successes / this.results.length) * 100;
+  }
+
+  async closeAll(): Promise<void> {
+    await this.manager.closeAll();
+  }
+}
+
+================================================================================
+FILE 6: src/index.ts (Main entry point)
+================================================================================
+
+import { ProfileManager } from './ProfileManager';
+import { HumanBehavior } from './HumanBehavior';
+import { ConcurrentRunner } from './ConcurrentRunner';
+
+async function main() {
+  console.log('================================================================================');
+  console.log('           PLAYWRIGHT PROFILE MANAGER - ANTI-DETECTION ENABLED');
+  console.log('================================================================================\n');
+
+  const manager = new ProfileManager();
+  
+  // PART 1: Create profiles with custom IDs (profile_01_id, profile_02_id format)
+  console.log('📦 CREATING PROFILES...\n');
+  
+  const profile1 = await manager.createProfile('profile_01_id');
+  const profile2 = await manager.createProfile('profile_02_id');
+  const profile3 = await manager.createProfile('profile_03_id');
+  
+  console.log('\n✅ Created profiles:');
+  manager.listProfiles().forEach(p => {
+    console.log(`   - ${p.id} (created: ${p.createdAt.split('T')[0]})`);
+  });
+  
+  // PART 2: Launch single profile with anti-detection
+  console.log('\n================================================================================');
+  console.log('🔥 TESTING SINGLE PROFILE WITH ANTI-DETECTION');
+  console.log('================================================================================\n');
+  
+  const { page } = await manager.launchProfile('profile_01_id');
+  
+  // Test stealth mode
+  console.log('\n🔍 VERIFYING STEALTH MODE:');
+  
+  const webdriverHidden = await page.evaluate(() => (navigator as any).webdriver === undefined);
+  console.log(`   ${webdriverHidden ? '✅' : '❌'} Webdriver flag: ${webdriverHidden ? 'HIDDEN' : 'VISIBLE'}`);
+  
+  const chromeRuntime = await page.evaluate(() => !!(window as any).chrome?.runtime);
+  console.log(`   ${chromeRuntime ? '✅' : '❌'} Chrome runtime: ${chromeRuntime ? 'PRESENT' : 'MISSING'}`);
+  
+  const pluginsCount = await page.evaluate(() => navigator.plugins.length);
+  console.log(`   ${pluginsCount > 0 ? '✅' : '❌'} Plugins count: ${pluginsCount}`);
+  
+  const hardwareConcurrency = await page.evaluate(() => navigator.hardwareConcurrency);
+  console.log(`   ${hardwareConcurrency >= 4 ? '✅' : '⚠️'} Hardware concurrency: ${hardwareConcurrency}`);
+  
+  // Navigate with human-like behavior
+  console.log('\n🌐 NAVIGATING WITH HUMAN-LIKE BEHAVIOR:');
+  await page.goto('https://x.com');
+  await HumanBehavior.delay(1000, 1500);
+  console.log('   ✅ Navigated to x.com');
+  
+  // Take screenshot
+  await page.screenshot({ path: 'example-screenshot.png' });
+  console.log('   📸 Screenshot saved: example-screenshot.png');
+  
+  // PART 3: Concurrent execution
+  console.log('\n================================================================================');
+  console.log('🚀 RUNNING CONCURRENT PROFILES');
+  console.log('================================================================================\n');
+  
+  const runner = new ConcurrentRunner(3); // Max 3 concurrent
+  
+  const results = await runner.runProfiles(
+    ['profile_01_id', 'profile_02_id', 'profile_03_id'],
+    async (page, profileId) => {
+      console.log(`   📍 Profile ${profileId}: visiting https://httpbin.org/user-agent`);
+      await page.goto('https://httpbin.org/user-agent');
+      await HumanBehavior.delay(1500, 2500);
+      
+      const content = await page.content();
+      const userAgentMatch = content.match(/"user-agent": "([^"]+)"/);
+      if (userAgentMatch) {
+        console.log(`   📱 Profile ${profileId} User Agent: ${userAgentMatch[1].slice(0, 60)}...`);
+      }
+    }
+  );
+  
+  console.log('\n📊 CONCURRENT EXECUTION RESULTS:');
+  console.log(`   Success rate: ${runner.getSuccessRate().toFixed(1)}%`);
+  results.forEach(r => {
+    console.log(`   ${r.success ? '✅' : '❌'} ${r.profileId}: ${r.success ? r.duration + 'ms' : r.error}`);
+  });
+  
+  // PART 4: Close everything
+  console.log('\n================================================================================');
+  await manager.closeAll();
+  
+  console.log('\n✨ All operations completed successfully!');
+  console.log('================================================================================');
+}
+
+// Handle graceful shutdown
+process.on('SIGINT', async () => {
+  console.log('\n\n⚠️ Received SIGINT. Closing all profiles...');
+  const manager = new ProfileManager();
+  await manager.closeAll();
+  process.exit(0);
+});
+
+process.on('SIGTERM', async () => {
+  console.log('\n\n⚠️ Received SIGTERM. Closing all profiles...');
+  const manager = new ProfileManager();
+  await manager.closeAll();
+  process.exit(0);
+});
+
+main().catch(async (error) => {
+  console.error('\n❌ Fatal error:', error);
+  const manager = new ProfileManager();
+  await manager.closeAll();
+  process.exit(1);
+});
+
+================================================================================
+FILE 7: src/test-stealth.ts (Stealth validation test)
+================================================================================
+
+import { ProfileManager } from './ProfileManager';
+
+interface TestResult {
+  name: string;
+  passed: boolean;
+  details?: string;
+}
+
+async function testStealthMode() {
+  console.log('================================================================================');
+  console.log('                    STEALTH MODE VALIDATION TEST');
+  console.log('================================================================================\n');
+  
+  const manager = new ProfileManager('./test_profiles');
+  
+  // Create a test profile
+  const profile = await manager.createProfile('stealth_test_profile');
+  console.log(`✅ Created test profile: ${profile.id}\n`);
+  
+  let context, page;
+  
+  try {
+    ({ context, page } = await manager.launchProfile('stealth_test_profile'));
+    
+    console.log('🔍 RUNNING STEALTH TESTS:\n');
+    
+    const tests: TestResult[] = [];
+    
+    // Test 1: webdriver flag
+    const webdriver = await page.evaluate(() => (navigator as any).webdriver);
+    tests.push({
+      name: 'Webdriver flag removal',
+      passed: webdriver === undefined,
+      details: webdriver === undefined ? 'Flag successfully hidden' : `Flag is ${webdriver}`
+    });
+    
+    // Test 2: chrome.runtime
+    const hasChromeRuntime = await page.evaluate(() => !!(window as any).chrome?.runtime);
+    tests.push({
+      name: 'Chrome runtime presence',
+      passed: hasChromeRuntime === true,
+      details: hasChromeRuntime ? 'chrome.runtime exists' : 'chrome.runtime missing'
+    });
+    
+    // Test 3: plugins length
+    const pluginsLength = await page.evaluate(() => navigator.plugins.length);
+    tests.push({
+      name: 'Plugins count',
+      passed: pluginsLength > 0,
+      details: `${pluginsLength} plugins detected`
+    });
+    
+    // Test 4: languages include Vietnamese
+    const languages = await page.evaluate(() => navigator.languages);
+    const hasVietnamese = languages.includes('vi-VN');
+    tests.push({
+      name: 'Vietnamese language support',
+      passed: hasVietnamese,
+      details: `Languages: ${languages.join(', ')}`
+    });
+    
+    // Test 5: hardware concurrency
+    const hardwareConcurrency = await page.evaluate(() => navigator.hardwareConcurrency);
+    tests.push({
+      name: 'Hardware concurrency',
+      passed: hardwareConcurrency >= 4 && hardwareConcurrency <= 16,
+      details: `${hardwareConcurrency} cores`
+    });
+    
+    // Test 6: device memory
+    const deviceMemory = await page.evaluate(() => (navigator as any).deviceMemory);
+    tests.push({
+      name: 'Device memory',
+      passed: deviceMemory >= 4 && deviceMemory <= 16,
+      details: `${deviceMemory} GB`
+    });
+    
+    // Test 7: WebGL vendor (should not be Google SwiftShader)
+    const webglVendor = await page.evaluate(() => {
+      const canvas = document.createElement('canvas');
+      const gl = canvas.getContext('webgl');
+      if (!gl) return null;
+      const debugInfo = gl.getExtension('WEBGL_debug_renderer_info');
+      if (!debugInfo) return null;
+      return gl.getParameter(debugInfo.UNMASKED_VENDOR_WEBGL);
+    });
+    
+    tests.push({
+      name: 'WebGL vendor (anti-detection)',
+      passed: webglVendor !== null && !webglVendor.includes('SwiftShader') && webglVendor !== 'Google Inc.',
+      details: webglVendor || 'Unknown'
+    });
+    
+    // Test 8: permissions API
+    const permissionState = await page.evaluate(async () => {
+      try {
+        const result = await navigator.permissions.query({ name: 'notifications' as PermissionName });
+        return result.state;
+      } catch {
+        return 'error';
+      }
+    });
+    
+    tests.push({
+      name: 'Permissions API',
+      passed: permissionState !== 'error',
+      details: `State: ${permissionState}`
+    });
+    
+    // Display results
+    console.log('📊 TEST RESULTS:\n');
+    console.log('┌────────────┬────────────────────────────────┬──────────┐');
+    console.log('│ STATUS     │ TEST                           │ DETAILS  │');
+    console.log('├────────────┼────────────────────────────────┼──────────┤');
+    
+    for (const test of tests) {
+      const status = test.passed ? '✅ PASS' : '❌ FAIL';
+      const name = test.name.padEnd(30).slice(0, 30);
+      const details = (test.details || '').slice(0, 20);
+      console.log(`│ ${status} │ ${name} │ ${details.padEnd(8)} │`);
+    }
+    
+    console.log('└────────────┴────────────────────────────────┴──────────┘\n');
+    
+    // Calculate score
+    const passedCount = tests.filter(t => t.passed).length;
+    const score = (passedCount / tests.length) * 100;
+    
+    console.log('📈 FINAL SCORE:');
+    console.log(`   Passed: ${passedCount}/${tests.length} (${score.toFixed(1)}%)`);
+    console.log('');
+    
+    if (score >= 80) {
+      console.log('🎉 STEALTH MODE VALIDATED - Excellent anti-detection!');
+    } else if (score >= 60) {
+      console.log('⚠️ STEALTH MODE PARTIAL - Some detection vectors remain');
+    } else {
+      console.log('❌ STEALTH MODE FAILED - Check configuration');
+    }
+    
+    // Take screenshot for visual inspection
+    await page.screenshot({ path: 'stealth-test-screenshot.png', fullPage: true });
+    console.log

@@ -1,0 +1,1798 @@
+================================================================================
+                    COMPLETE OPTIMIZED CODE
+                    X ACTIONS WITH PROFILE MANAGER - FINAL VERSION
+================================================================================
+
+This file contains ALL optimized code ready to copy and use.
+
+================================================================================
+FILE 1: src/sqlite-profile-storage.ts
+================================================================================
+
+import Database from 'better-sqlite3';
+import * as fs from 'fs';
+
+export interface XProfileData {
+  id: string;
+  username: string;
+  displayName: string;
+  email?: string;
+  userId?: string;
+  cookies: any[];
+  storageState?: any;
+  userDataDir: string;
+  isVerified: boolean;
+  followersCount: number;
+  followingCount: number;
+  tweetCount: number;
+  avatarUrl?: string;
+  bannerUrl?: string;
+  lastLogin?: Date;
+  metadata?: Record<string, any>;
+}
+
+export interface SessionRecord {
+  profileId: string;
+  loginTime: Date;
+  logoutTime?: Date;
+  ipAddress?: string;
+  userAgent?: string;
+  sessionDuration?: number;
+  status: 'active' | 'expired' | 'revoked';
+}
+
+export interface CachedTweet {
+  id: string;
+  profileId: string;
+  authorUsername: string;
+  tweetText: string;
+  likesCount: number;
+  retweetsCount: number;
+  repliesCount: number;
+  viewsCount: number;
+  fetchedAt: Date;
+  rawJson?: any;
+}
+
+export class SQLiteProfileStorage {
+  private db: Database.Database;
+  private dbPath: string;
+
+  constructor(dbPath: string = './x_profiles.db') {
+    this.dbPath = dbPath;
+    this.db = new Database(dbPath);
+    this.initTables();
+    console.log(`✅ SQLite database initialized: ${dbPath}`);
+  }
+
+  getDatabasePath(): string {
+    return this.dbPath;
+  }
+
+  private initTables(): void {
+    this.db.exec(`
+      CREATE TABLE IF NOT EXISTS profiles (
+        id TEXT PRIMARY KEY,
+        username TEXT NOT NULL,
+        display_name TEXT NOT NULL,
+        email TEXT,
+        user_id TEXT,
+        cookies_json TEXT NOT NULL,
+        storage_state_json TEXT,
+        user_data_dir TEXT NOT NULL,
+        is_verified INTEGER DEFAULT 0,
+        followers_count INTEGER DEFAULT 0,
+        following_count INTEGER DEFAULT 0,
+        tweet_count INTEGER DEFAULT 0,
+        avatar_url TEXT,
+        banner_url TEXT,
+        last_login DATETIME,
+        created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+        updated_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+        is_active INTEGER DEFAULT 1,
+        metadata_json TEXT
+      )
+    `);
+
+    this.db.exec(`
+      CREATE TABLE IF NOT EXISTS sessions (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        profile_id TEXT NOT NULL,
+        login_time DATETIME DEFAULT CURRENT_TIMESTAMP,
+        logout_time DATETIME,
+        ip_address TEXT,
+        user_agent TEXT,
+        session_duration INTEGER,
+        status TEXT DEFAULT 'active',
+        FOREIGN KEY (profile_id) REFERENCES profiles(id) ON DELETE CASCADE
+      )
+    `);
+
+    this.db.exec(`
+      CREATE TABLE IF NOT EXISTS tweets_cache (
+        id TEXT PRIMARY KEY,
+        profile_id TEXT NOT NULL,
+        author_username TEXT,
+        tweet_text TEXT,
+        likes_count INTEGER DEFAULT 0,
+        retweets_count INTEGER DEFAULT 0,
+        replies_count INTEGER DEFAULT 0,
+        views_count INTEGER DEFAULT 0,
+        fetched_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+        raw_json TEXT,
+        FOREIGN KEY (profile_id) REFERENCES profiles(id) ON DELETE CASCADE
+      )
+    `);
+
+    this.db.exec(`
+      CREATE TABLE IF NOT EXISTS activity_log (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        profile_id TEXT NOT NULL,
+        action_type TEXT NOT NULL,
+        action_details TEXT,
+        target_url TEXT,
+        success INTEGER DEFAULT 1,
+        error_message TEXT,
+        created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+      )
+    `);
+
+    this.db.exec(`
+      CREATE INDEX IF NOT EXISTS idx_profiles_username ON profiles(username);
+      CREATE INDEX IF NOT EXISTS idx_profiles_last_login ON profiles(last_login);
+      CREATE INDEX IF NOT EXISTS idx_sessions_profile_id ON sessions(profile_id);
+      CREATE INDEX IF NOT EXISTS idx_sessions_status ON sessions(status);
+      CREATE INDEX IF NOT EXISTS idx_tweets_profile_id ON tweets_cache(profile_id);
+      CREATE INDEX IF NOT EXISTS idx_activity_profile_id ON activity_log(profile_id);
+    `);
+  }
+
+  saveProfile(profileData: XProfileData): void {
+    const stmt = this.db.prepare(`
+      INSERT OR REPLACE INTO profiles (
+        id, username, display_name, email, user_id, cookies_json, 
+        storage_state_json, user_data_dir, is_verified, followers_count,
+        following_count, tweet_count, avatar_url, banner_url, 
+        last_login, updated_at, metadata_json, is_active
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP, ?, ?)
+    `);
+
+    stmt.run(
+      profileData.id,
+      profileData.username,
+      profileData.displayName,
+      profileData.email || null,
+      profileData.userId || null,
+      JSON.stringify(profileData.cookies),
+      profileData.storageState ? JSON.stringify(profileData.storageState) : null,
+      profileData.userDataDir,
+      profileData.isVerified ? 1 : 0,
+      profileData.followersCount || 0,
+      profileData.followingCount || 0,
+      profileData.tweetCount || 0,
+      profileData.avatarUrl || null,
+      profileData.bannerUrl || null,
+      profileData.lastLogin ? profileData.lastLogin.toISOString() : new Date().toISOString(),
+      profileData.metadata ? JSON.stringify(profileData.metadata) : null,
+      1
+    );
+
+    console.log(`✅ Saved profile: ${profileData.username} (${profileData.id})`);
+  }
+
+  getProfileById(profileId: string): XProfileData | null {
+    const stmt = this.db.prepare('SELECT * FROM profiles WHERE id = ? AND is_active = 1');
+    const row = stmt.get(profileId) as any;
+    
+    if (!row) return null;
+    
+    return {
+      id: row.id,
+      username: row.username,
+      displayName: row.display_name,
+      email: row.email,
+      userId: row.user_id,
+      cookies: JSON.parse(row.cookies_json),
+      storageState: row.storage_state_json ? JSON.parse(row.storage_state_json) : undefined,
+      userDataDir: row.user_data_dir,
+      isVerified: row.is_verified === 1,
+      followersCount: row.followers_count,
+      followingCount: row.following_count,
+      tweetCount: row.tweet_count,
+      avatarUrl: row.avatar_url,
+      bannerUrl: row.banner_url,
+      lastLogin: row.last_login ? new Date(row.last_login) : undefined,
+      metadata: row.metadata_json ? JSON.parse(row.metadata_json) : undefined
+    };
+  }
+
+  getProfileByUsername(username: string): XProfileData | null {
+    const stmt = this.db.prepare('SELECT * FROM profiles WHERE username = ? AND is_active = 1');
+    const row = stmt.get(username) as any;
+    
+    if (!row) return null;
+    
+    return {
+      id: row.id,
+      username: row.username,
+      displayName: row.display_name,
+      email: row.email,
+      userId: row.user_id,
+      cookies: JSON.parse(row.cookies_json),
+      storageState: row.storage_state_json ? JSON.parse(row.storage_state_json) : undefined,
+      userDataDir: row.user_data_dir,
+      isVerified: row.is_verified === 1,
+      followersCount: row.followers_count,
+      followingCount: row.following_count,
+      tweetCount: row.tweet_count,
+      avatarUrl: row.avatar_url,
+      bannerUrl: row.banner_url,
+      lastLogin: row.last_login ? new Date(row.last_login) : undefined,
+      metadata: row.metadata_json ? JSON.parse(row.metadata_json) : undefined
+    };
+  }
+
+  getAllProfiles(): XProfileData[] {
+    const stmt = this.db.prepare('SELECT * FROM profiles WHERE is_active = 1 ORDER BY last_login DESC');
+    const rows = stmt.all() as any[];
+    
+    return rows.map(row => ({
+      id: row.id,
+      username: row.username,
+      displayName: row.display_name,
+      email: row.email,
+      userId: row.user_id,
+      cookies: JSON.parse(row.cookies_json),
+      storageState: row.storage_state_json ? JSON.parse(row.storage_state_json) : undefined,
+      userDataDir: row.user_data_dir,
+      isVerified: row.is_verified === 1,
+      followersCount: row.followers_count,
+      followingCount: row.following_count,
+      tweetCount: row.tweet_count,
+      avatarUrl: row.avatar_url,
+      bannerUrl: row.banner_url,
+      lastLogin: row.last_login ? new Date(row.last_login) : undefined,
+      metadata: row.metadata_json ? JSON.parse(row.metadata_json) : undefined
+    }));
+  }
+
+  saveSession(session: SessionRecord): number {
+    const stmt = this.db.prepare(`
+      INSERT INTO sessions (profile_id, login_time, ip_address, user_agent, status)
+      VALUES (?, ?, ?, ?, ?)
+    `);
+    
+    const result = stmt.run(
+      session.profileId,
+      session.loginTime.toISOString(),
+      session.ipAddress || null,
+      session.userAgent || null,
+      session.status
+    );
+    
+    console.log(`✅ Saved session for profile: ${session.profileId}`);
+    return result.lastInsertRowid as number;
+  }
+
+  updateSessionLogout(sessionId: number, profileId: string): void {
+    const stmt = this.db.prepare(`
+      UPDATE sessions 
+      SET logout_time = ?, session_duration = ?, status = 'expired'
+      WHERE id = ? AND profile_id = ?
+    `);
+    
+    const now = new Date();
+    const session = this.db.prepare('SELECT login_time FROM sessions WHERE id = ?').get(sessionId) as any;
+    
+    if (session) {
+      const duration = Math.floor((now.getTime() - new Date(session.login_time).getTime()) / 1000);
+      stmt.run(now.toISOString(), duration, sessionId, profileId);
+    }
+  }
+
+  getActiveSession(profileId: string): any | null {
+    const stmt = this.db.prepare(`
+      SELECT * FROM sessions 
+      WHERE profile_id = ? AND status = 'active' 
+      ORDER BY login_time DESC LIMIT 1
+    `);
+    return stmt.get(profileId);
+  }
+
+  saveTweetCache(tweet: CachedTweet): void {
+    const stmt = this.db.prepare(`
+      INSERT OR REPLACE INTO tweets_cache (
+        id, profile_id, author_username, tweet_text, 
+        likes_count, retweets_count, replies_count, views_count, raw_json
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+    `);
+    
+    stmt.run(
+      tweet.id,
+      tweet.profileId,
+      tweet.authorUsername,
+      tweet.tweetText.slice(0, 5000),
+      tweet.likesCount,
+      tweet.retweetsCount,
+      tweet.repliesCount,
+      tweet.viewsCount,
+      tweet.rawJson ? JSON.stringify(tweet.rawJson) : null
+    );
+    
+    console.log(`✅ Cached tweet: ${tweet.id}`);
+  }
+
+  logActivity(
+    profileId: string,
+    actionType: string,
+    actionDetails?: string,
+    targetUrl?: string,
+    success: boolean = true,
+    errorMessage?: string
+  ): void {
+    const stmt = this.db.prepare(`
+      INSERT INTO activity_log (profile_id, action_type, action_details, target_url, success, error_message)
+      VALUES (?, ?, ?, ?, ?, ?)
+    `);
+    
+    stmt.run(profileId, actionType, actionDetails || null, targetUrl || null, success ? 1 : 0, errorMessage || null);
+  }
+
+  deleteProfile(profileId: string, softDelete: boolean = true): void {
+    if (softDelete) {
+      const stmt = this.db.prepare('UPDATE profiles SET is_active = 0 WHERE id = ?');
+      stmt.run(profileId);
+      console.log(`✅ Soft deleted profile: ${profileId}`);
+    } else {
+      const stmt = this.db.prepare('DELETE FROM profiles WHERE id = ?');
+      stmt.run(profileId);
+      console.log(`✅ Permanently deleted profile: ${profileId}`);
+    }
+  }
+
+  close(): void {
+    this.db.close();
+    console.log('🔒 Database connection closed');
+  }
+}
+
+================================================================================
+FILE 2: src/human-behavior.ts
+================================================================================
+
+import { Page } from 'playwright';
+
+export class HumanBehavior {
+  
+  private static bezierCurve(t: number, p0: number, p1: number, p2: number, p3: number): number {
+    const mt = 1 - t;
+    return mt * mt * mt * p0 + 3 * mt * mt * t * p1 + 3 * mt * t * t * p2 + t * t * t * p3;
+  }
+
+  static async mouseMove(page: Page, targetX: number, targetY: number): Promise<void> {
+    const start = await page.mouse.getPosition();
+    const steps = 40 + Math.floor(Math.random() * 40);
+    
+    const cp1x = start.x + (targetX - start.x) * 0.3 + (Math.random() - 0.5) * 50;
+    const cp1y = start.y + (targetY - start.y) * 0.3 + (Math.random() - 0.5) * 50;
+    const cp2x = start.x + (targetX - start.x) * 0.7 + (Math.random() - 0.5) * 50;
+    const cp2y = start.y + (targetY - start.y) * 0.7 + (Math.random() - 0.5) * 50;
+    
+    for (let i = 0; i <= steps; i++) {
+      const t = i / steps;
+      const x = this.bezierCurve(t, start.x, cp1x, cp2x, targetX);
+      const y = this.bezierCurve(t, start.y, cp1y, cp2y, targetY);
+      await page.mouse.move(x, y);
+      await page.waitForTimeout(Math.random() * 8 + 3);
+    }
+  }
+
+  static async type(page: Page, selector: string, text: string): Promise<void> {
+    await page.click(selector);
+    await page.waitForTimeout(Math.random() * 200 + 100);
+    
+    for (const char of text) {
+      await page.keyboard.type(char);
+      const delay = Math.random() * 80 + 40 + (char === ' ' ? 20 : 0);
+      await page.waitForTimeout(delay);
+    }
+  }
+
+  static async clickLikeHuman(page: Page, selector: string): Promise<void> {
+    const element = await page.$(selector);
+    if (element) {
+      const boundingBox = await element.boundingBox();
+      if (boundingBox) {
+        const offsetX = boundingBox.width * (0.3 + Math.random() * 0.4);
+        const offsetY = boundingBox.height * (0.3 + Math.random() * 0.4);
+        await this.mouseMove(page, boundingBox.x + offsetX, boundingBox.y + offsetY);
+        await this.delay(100, 300);
+        await page.mouse.click(boundingBox.x + offsetX, boundingBox.y + offsetY);
+      }
+    } else {
+      await page.click(selector);
+    }
+  }
+
+  static async scroll(page: Page, distance: number): Promise<void> {
+    const steps = 20 + Math.floor(Math.random() * 15);
+    const stepDistance = distance / steps;
+    let remaining = distance;
+    
+    for (let i = 0; i < steps && remaining > 0; i++) {
+      const step = Math.min(stepDistance + (Math.random() - 0.5) * 20, remaining);
+      await page.mouse.wheel(0, step);
+      remaining -= step;
+      await page.waitForTimeout(Math.random() * 50 + 25);
+    }
+  }
+
+  static async delay(minMs: number = 500, maxMs: number = 2000): Promise<void> {
+    const delay = Math.random() * (maxMs - minMs) + minMs;
+    await new Promise(resolve => setTimeout(resolve, delay));
+  }
+
+  static async randomMouseMovement(page: Page): Promise<void> {
+    const viewport = page.viewportSize();
+    if (viewport) {
+      const x = Math.random() * viewport.width;
+      const y = Math.random() * viewport.height;
+      await this.mouseMove(page, x, y);
+    }
+  }
+
+  static async scrollToElement(page: Page, selector: string): Promise<void> {
+    const element = await page.$(selector);
+    if (element) {
+      const boundingBox = await element.boundingBox();
+      if (boundingBox) {
+        await this.scroll(page, boundingBox.y);
+        await this.delay(500, 1000);
+      }
+    }
+  }
+
+  static async hover(page: Page, selector: string): Promise<void> {
+    const element = await page.$(selector);
+    if (element) {
+      const boundingBox = await element.boundingBox();
+      if (boundingBox) {
+        await this.mouseMove(page, boundingBox.x + boundingBox.width / 2, boundingBox.y + boundingBox.height / 2);
+        await this.delay(100, 200);
+      }
+    }
+  }
+}
+
+================================================================================
+FILE 3: src/x-actions.ts
+================================================================================
+
+import { Page } from 'playwright';
+import { HumanBehavior } from './human-behavior.js';
+
+export interface TweetInfo {
+  id?: string;
+  text: string;
+  authorName: string;
+  authorUsername: string;
+  tweetUrl: string;
+  timestamp: string;
+  likes?: string;
+  retweets?: string;
+  replies?: string;
+  views?: string;
+  isVerified?: boolean;
+  mediaUrls?: string[];
+}
+
+export interface UserProfileInfo {
+  displayName: string;
+  username: string;
+  bio?: string;
+  location?: string;
+  website?: string;
+  joinDate?: string;
+  followersCount: string;
+  followingCount: string;
+  tweetsCount: string;
+  isVerified: boolean;
+  avatarUrl?: string;
+  bannerUrl?: string;
+}
+
+export interface NotificationInfo {
+  type: 'like' | 'retweet' | 'reply' | 'follow' | 'mention';
+  fromUsername: string;
+  fromDisplayName: string;
+  tweetText?: string;
+  timestamp: string;
+  isRead: boolean;
+}
+
+export class XActions {
+  
+  // ========== HELPER FUNCTIONS ==========
+  
+  static async waitForFeed(page: Page, timeout: number = 15000): Promise<boolean> {
+    try {
+      await page.waitForSelector('article[data-testid="tweet"]', { timeout });
+      await HumanBehavior.delay(500, 1000);
+      return true;
+    } catch {
+      console.warn(`Timeout waiting for feed after ${timeout}ms`);
+      return false;
+    }
+  }
+
+  static async getFirstTweetSafe(page: Page, timeout: number = 10000): Promise<TweetInfo | null> {
+    try {
+      const loaded = await this.waitForFeed(page, timeout);
+      if (!loaded) return null;
+      return await this.getFirstTweet(page);
+    } catch (error) {
+      console.warn('Failed to get first tweet:', error);
+      return null;
+    }
+  }
+
+  // ========== READ TWEETS ==========
+  
+  static async getFirstTweet(page: Page): Promise<TweetInfo | null> {
+    await this.waitForFeed(page);
+    
+    return await page.evaluate(() => {
+      const article = document.querySelector('article[data-testid="tweet"]');
+      if (!article) return null;
+      
+      const textEl = article.querySelector('[data-testid="tweetText"]');
+      const authorNameEl = article.querySelector('[data-testid="User-Name"] a span span');
+      const authorUsernameEl = article.querySelector('[data-testid="User-Name"] a[href*="/"]:last-child span');
+      const tweetLink = article.querySelector('a[href*="/status/"]')?.getAttribute('href');
+      const timeEl = article.querySelector('time');
+      const verifiedIcon = article.querySelector('[data-testid="icon-verified"]');
+      
+      const statsGroup = article.querySelector('div[role="group"][aria-label]');
+      const ariaLabel = statsGroup?.getAttribute('aria-label') || '';
+      
+      const parseStat = (label: string, name: string): string => {
+        const match = label.match(new RegExp(`(\\d+(?:,\\d+)*(?:\\.\\d+)?[KkM]?)\\s*${name}`));
+        return match ? match[1] : '0';
+      };
+      
+      return {
+        text: textEl?.innerText || '',
+        authorName: authorNameEl?.innerText || '',
+        authorUsername: authorUsernameEl?.innerText?.replace('@', '') || '',
+        tweetUrl: tweetLink ? `https://x.com${tweetLink}` : '',
+        timestamp: timeEl?.getAttribute('datetime') || '',
+        likes: parseStat(ariaLabel, 'likes?'),
+        retweets: parseStat(ariaLabel, 'reposts?'),
+        replies: parseStat(ariaLabel, 'replies?'),
+        views: parseStat(ariaLabel, 'views?'),
+        isVerified: !!verifiedIcon
+      };
+    });
+  }
+
+  static async getAllTweets(page: Page, maxTweets: number = 20): Promise<TweetInfo[]> {
+    await this.waitForFeed(page);
+    
+    return await page.evaluate((max) => {
+      const articles = Array.from(document.querySelectorAll('article[data-testid="tweet"]')).slice(0, max);
+      
+      return articles.map(article => {
+        const textEl = article.querySelector('[data-testid="tweetText"]');
+        const authorNameEl = article.querySelector('[data-testid="User-Name"] a span span');
+        const authorUsernameEl = article.querySelector('[data-testid="User-Name"] a[href*="/"]:last-child span');
+        const tweetLink = article.querySelector('a[href*="/status/"]')?.getAttribute('href');
+        const timeEl = article.querySelector('time');
+        
+        return {
+          text: textEl?.innerText || '',
+          authorName: authorNameEl?.innerText || '',
+          authorUsername: authorUsernameEl?.innerText?.replace('@', '') || '',
+          tweetUrl: tweetLink ? `https://x.com${tweetLink}` : '',
+          timestamp: timeEl?.getAttribute('datetime') || '',
+        };
+      });
+    }, maxTweets);
+  }
+
+  static async getCurrentTweetDetail(page: Page): Promise<TweetInfo | null> {
+    await page.waitForSelector('article[data-testid="tweet"]', { timeout: 10000 });
+    
+    return await page.evaluate(() => {
+      const article = document.querySelector('article[data-testid="tweet"]');
+      if (!article) return null;
+      
+      const textEl = article.querySelector('[data-testid="tweetText"]');
+      const authorNameEl = article.querySelector('[data-testid="User-Name"] a span span');
+      const authorUsernameEl = article.querySelector('[data-testid="User-Name"] a[href*="/"]:last-child span');
+      const timeEl = article.querySelector('time');
+      
+      return {
+        text: textEl?.innerText || '',
+        authorName: authorNameEl?.innerText || '',
+        authorUsername: authorUsernameEl?.innerText?.replace('@', '') || '',
+        tweetUrl: window.location.href,
+        timestamp: timeEl?.getAttribute('datetime') || '',
+      };
+    });
+  }
+
+  // ========== CLICK TWEETS ==========
+  
+  static async clickFirstTweet(page: Page, humanLike: boolean = true): Promise<boolean> {
+    const loaded = await this.waitForFeed(page);
+    if (!loaded) return false;
+    
+    const tweet = await page.locator('article[data-testid="tweet"]').first();
+    
+    if (await tweet.count() === 0) return false;
+    
+    if (humanLike) {
+      const box = await tweet.boundingBox();
+      if (box) {
+        await HumanBehavior.mouseMove(page, box.x + box.width / 2, box.y + box.height / 2);
+        await HumanBehavior.delay(200, 400);
+      }
+    }
+    
+    await tweet.click();
+    await page.waitForURL('**/status/**', { timeout: 10000 });
+    await HumanBehavior.delay(1500, 2500);
+    
+    console.log('✅ Clicked first tweet');
+    return true;
+  }
+
+  static async clickTweetByIndex(page: Page, index: number, humanLike: boolean = true): Promise<boolean> {
+    const loaded = await this.waitForFeed(page);
+    if (!loaded) return false;
+    
+    const tweets = await page.$$('article[data-testid="tweet"]');
+    if (index >= tweets.length) return false;
+    
+    const tweet = tweets[index];
+    
+    if (humanLike) {
+      const box = await tweet.boundingBox();
+      if (box) {
+        await HumanBehavior.mouseMove(page, box.x + box.width / 2, box.y + box.height / 2);
+        await HumanBehavior.delay(200, 400);
+      }
+    }
+    
+    await tweet.click();
+    await page.waitForURL('**/status/**', { timeout: 10000 });
+    await HumanBehavior.delay(1500, 2500);
+    
+    console.log(`✅ Clicked tweet #${index + 1}`);
+    return true;
+  }
+
+  // ========== INTERACT WITH TWEET ==========
+  
+  static async likeCurrentTweet(page: Page): Promise<boolean> {
+    const likeButton = await page.locator('[data-testid="like"]').first();
+    
+    if (await likeButton.count() === 0) return false;
+    
+    const ariaLabel = await likeButton.getAttribute('aria-label');
+    const isLiked = ariaLabel?.includes('Unlike');
+    
+    if (!isLiked) {
+      await HumanBehavior.clickLikeHuman(page, '[data-testid="like"]');
+      await HumanBehavior.delay(500, 1000);
+      console.log('❤️ Liked tweet');
+      return true;
+    }
+    
+    console.log('Tweet already liked');
+    return false;
+  }
+
+  static async retweetCurrentTweet(page: Page): Promise<boolean> {
+    const retweetButton = await page.locator('[data-testid="retweet"]').first();
+    
+    if (await retweetButton.count() === 0) return false;
+    
+    await HumanBehavior.clickLikeHuman(page, '[data-testid="retweet"]');
+    await HumanBehavior.delay(800, 1200);
+    
+    const confirmButton = await page.locator('[data-testid="retweetConfirm"]');
+    if (await confirmButton.count() > 0) {
+      await HumanBehavior.clickLikeHuman(page, '[data-testid="retweetConfirm"]');
+      await HumanBehavior.delay(500, 1000);
+    }
+    
+    console.log('🔄 Retweeted');
+    return true;
+  }
+
+  static async replyToTweet(page: Page, replyText: string): Promise<boolean> {
+    const replyButton = await page.locator('[data-testid="reply"]').first();
+    
+    if (await replyButton.count() === 0) return false;
+    
+    await HumanBehavior.clickLikeHuman(page, '[data-testid="reply"]');
+    await HumanBehavior.delay(800, 1200);
+    
+    const textarea = await page.locator('[data-testid="tweetTextarea_0"]');
+    await HumanBehavior.type(page, textarea, replyText);
+    await HumanBehavior.delay(500, 1000);
+    
+    const postButton = await page.locator('[data-testid="tweetButton"]');
+    await HumanBehavior.clickLikeHuman(page, '[data-testid="tweetButton"]');
+    await HumanBehavior.delay(1500, 2500);
+    
+    console.log(`💬 Replied: ${replyText.substring(0, 50)}...`);
+    return true;
+  }
+
+  static async bookmarkCurrentTweet(page: Page): Promise<boolean> {
+    const bookmarkButton = await page.locator('[data-testid="bookmark"]').first();
+    
+    if (await bookmarkButton.count() === 0) return false;
+    
+    await HumanBehavior.clickLikeHuman(page, '[data-testid="bookmark"]');
+    await HumanBehavior.delay(500, 1000);
+    
+    console.log('🔖 Bookmarked tweet');
+    return true;
+  }
+
+  // ========== NAVIGATION ==========
+  
+  static async goToHome(page: Page): Promise<void> {
+    await page.goto('https://x.com/home');
+    await this.waitForFeed(page);
+    await HumanBehavior.delay(1500, 2500);
+    console.log('🏠 Navigated to Home');
+  }
+
+  static async goToExplore(page: Page): Promise<void> {
+    await page.goto('https://x.com/explore');
+    await HumanBehavior.delay(1500, 2500);
+    console.log('🔍 Navigated to Explore');
+  }
+
+  static async goToNotifications(page: Page): Promise<void> {
+    await page.goto('https://x.com/notifications');
+    await HumanBehavior.delay(1500, 2500);
+    console.log('🔔 Navigated to Notifications');
+  }
+
+  static async goToProfile(page: Page, username: string): Promise<void> {
+    await page.goto(`https://x.com/${username}`);
+    await page.waitForSelector('[data-testid="UserName"]', { timeout: 10000 });
+    await HumanBehavior.delay(1500, 2500);
+    console.log(`👤 Navigated to profile: @${username}`);
+  }
+
+  static async goBack(page: Page): Promise<void> {
+    await page.goBack();
+    await HumanBehavior.delay(1000, 1500);
+    console.log('⬅️ Went back');
+  }
+
+  // ========== SCROLL ACTIONS ==========
+  
+  static async scrollFeed(page: Page, times: number = 1): Promise<void> {
+    for (let i = 0; i < times; i++) {
+      await HumanBehavior.scroll(page, 500);
+      await HumanBehavior.delay(1000, 1500);
+    }
+    console.log(`📜 Scrolled feed ${times} time(s)`);
+  }
+
+  static async loadMoreTweets(page: Page, maxScrolls: number = 5): Promise<number> {
+    let previousCount = 0;
+    let scrolls = 0;
+    
+    for (let i = 0; i < maxScrolls; i++) {
+      const currentCount = await page.$$eval('article[data-testid="tweet"]', els => els.length);
+      
+      if (currentCount === previousCount && i > 0) break;
+      
+      previousCount = currentCount;
+      await HumanBehavior.scroll(page, 800);
+      await HumanBehavior.delay(1500, 2000);
+      scrolls++;
+    }
+    
+    console.log(`📜 Loaded more tweets: ${scrolls} scrolls`);
+    return scrolls;
+  }
+
+  // ========== SEARCH ACTIONS ==========
+  
+  static async search(page: Page, query: string): Promise<void> {
+    await page.goto(`https://x.com/search?q=${encodeURIComponent(query)}&src=typed_query`);
+    await this.waitForFeed(page);
+    await HumanBehavior.delay(1500, 2500);
+    console.log(`🔎 Searched: ${query}`);
+  }
+
+  // ========== USER PROFILE ACTIONS ==========
+  
+  static async getUserProfile(page: Page, username: string): Promise<UserProfileInfo | null> {
+    await this.goToProfile(page, username);
+    
+    return await page.evaluate(() => {
+      const displayName = document.querySelector('[data-testid="UserName"] span')?.textContent || '';
+      const bioEl = document.querySelector('[data-testid="UserDescription"]');
+      const locationEl = document.querySelector('[data-testid="UserLocation"]');
+      const websiteEl = document.querySelector('[data-testid="UserUrl"]');
+      const joinDateEl = document.querySelector('[data-testid="UserJoinDate"]');
+      const verifiedIcon = document.querySelector('[data-testid="icon-verified"]');
+      
+      const stats = document.querySelectorAll('[data-testid="UserStats"]');
+      const statsText = Array.from(stats).map(el => el.textContent || '');
+      
+      return {
+        displayName: displayName,
+        username: username,
+        bio: bioEl?.textContent || '',
+        location: locationEl?.textContent || '',
+        website: websiteEl?.textContent || '',
+        joinDate: joinDateEl?.textContent || '',
+        followersCount: statsText.find(t => t.includes('Followers')) || '0',
+        followingCount: statsText.find(t => t.includes('Following')) || '0',
+        tweetsCount: statsText.find(t => t.includes('Posts')) || '0',
+        isVerified: !!verifiedIcon
+      };
+    });
+  }
+
+  static async followUser(page: Page, username: string): Promise<boolean> {
+    await this.goToProfile(page, username);
+    
+    const followButton = await page.locator('[data-testid="followButton"]');
+    if (await followButton.count() === 0) return false;
+    
+    const ariaLabel = await followButton.getAttribute('aria-label');
+    const isFollowing = ariaLabel?.includes('Following');
+    
+    if (!isFollowing) {
+      await HumanBehavior.clickLikeHuman(page, '[data-testid="followButton"]');
+      await HumanBehavior.delay(800, 1200);
+      console.log(`✅ Followed @${username}`);
+      return true;
+    }
+    
+    console.log(`Already following @${username}`);
+    return false;
+  }
+
+  // ========== NOTIFICATION ACTIONS ==========
+  
+  static async getUnreadCount(page: Page): Promise<number> {
+    await this.goToNotifications(page);
+    
+    const count = await page.evaluate(() => {
+      const badge = document.querySelector('[data-testid="AppTabBar_Notifications_Count"]');
+      return badge ? parseInt(badge.textContent || '0') : 0;
+    });
+    
+    console.log(`🔔 Unread notifications: ${count}`);
+    return count;
+  }
+
+  // ========== COMPOSE TWEET ==========
+  
+  static async composeTweet(page: Page, tweetText: string): Promise<boolean> {
+    const composeButton = await page.locator('[data-testid="SideNav_NewTweet_Button"]');
+    if (await composeButton.count() === 0) return false;
+    
+    await HumanBehavior.clickLikeHuman(page, '[data-testid="SideNav_NewTweet_Button"]');
+    await HumanBehavior.delay(800, 1200);
+    
+    const textarea = await page.locator('[data-testid="tweetTextarea_0"]');
+    await HumanBehavior.type(page, textarea, tweetText);
+    await HumanBehavior.delay(500, 1000);
+    
+    const postButton = await page.locator('[data-testid="tweetButton"]');
+    await HumanBehavior.clickLikeHuman(page, '[data-testid="tweetButton"]');
+    await HumanBehavior.delay(1500, 2500);
+    
+    console.log(`📝 Posted tweet: ${tweetText.substring(0, 50)}...`);
+    return true;
+  }
+
+  // ========== STATUS CHECKS ==========
+  
+  static async isLoggedIn(page: Page): Promise<boolean> {
+    const isOnLogin = await page.url().includes('/login');
+    if (isOnLogin) return false;
+    
+    const hasHomeFeed = await page.locator('article[data-testid="tweet"]').count() > 0;
+    const hasProfileIcon = await page.locator('[data-testid="SideNav_AccountSwitcher_Button"]').count() > 0;
+    
+    return hasHomeFeed || hasProfileIcon;
+  }
+
+  static async waitForLogin(page: Page, timeout: number = 120000): Promise<boolean> {
+    console.log('⏳ Waiting for manual login...');
+    
+    const startTime = Date.now();
+    while (Date.now() - startTime < timeout) {
+      if (await this.isLoggedIn(page)) {
+        console.log('✅ Login detected!');
+        await HumanBehavior.delay(2000, 3000);
+        return true;
+      }
+      await HumanBehavior.delay(2000, 3000);
+    }
+    
+    console.log('❌ Login timeout');
+    return false;
+  }
+}
+
+export default XActions;
+
+================================================================================
+FILE 4: src/profile-manager-with-sqlite.ts
+================================================================================
+
+import { chromium, BrowserContext, Page } from 'playwright';
+import * as fs from 'fs';
+import * as path from 'path';
+import { randomUUID } from 'crypto';
+import { SQLiteProfileStorage, XProfileData, SessionRecord } from './sqlite-profile-storage.js';
+
+export interface Fingerprint {
+  userAgent: string;
+  viewport: { width: number; height: number };
+  locale: string;
+  timezone: string;
+  platform: string;
+  hardwareConcurrency: number;
+  deviceMemory: number;
+  languages: string[];
+  webglVendor: string;
+  webglRenderer: string;
+}
+
+export interface ProfileConfig {
+  id: string;
+  name: string;
+  userDataDir: string;
+  createdAt: string;
+  lastUsed: string;
+  fingerprint: Fingerprint;
+  lastUrl?: string;
+}
+
+export interface LaunchOptions {
+  targetUrl?: string;
+  headless?: boolean;
+  timeout?: number;
+}
+
+export class ProfileManagerWithSQLite {
+  private basePath: string;
+  private activeContexts: Map<string, BrowserContext> = new Map();
+  private storage: SQLiteProfileStorage;
+
+  constructor(basePath: string = './browser_profiles', dbPath: string = './x_profiles.db') {
+    this.basePath = basePath;
+    this.storage = new SQLiteProfileStorage(dbPath);
+    if (!fs.existsSync(basePath)) {
+      fs.mkdirSync(basePath, { recursive: true });
+    }
+  }
+
+  private generateFingerprint(): Fingerprint {
+    const userAgents = [
+      'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+      'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+      'Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36'
+    ];
+    
+    const webglVendors = ['Intel Inc.', 'NVIDIA Corporation', 'Google Inc. (Intel)'];
+    const webglRenderers = [
+      'ANGLE (Intel, Intel(R) UHD Graphics 620 Direct3D11 vs_5_0 ps_5_0)',
+      'ANGLE (NVIDIA, NVIDIA GeForce GTX 1060 Direct3D11 vs_5_0 ps_5_0)'
+    ];
+    
+    const platforms = ['Win32', 'Win64', 'MacIntel', 'Linux x86_64'];
+    const hardwareOptions = [4, 6, 8, 10, 12];
+    const memoryOptions = [4, 8, 16];
+
+    return {
+      userAgent: userAgents[Math.floor(Math.random() * userAgents.length)],
+      viewport: { width: 1920, height: 1080 },
+      locale: 'vi-VN',
+      timezone: 'Asia/Ho_Chi_Minh',
+      platform: platforms[Math.floor(Math.random() * platforms.length)],
+      hardwareConcurrency: hardwareOptions[Math.floor(Math.random() * hardwareOptions.length)],
+      deviceMemory: memoryOptions[Math.floor(Math.random() * memoryOptions.length)],
+      languages: ['vi-VN', 'vi', 'en-US', 'en'],
+      webglVendor: webglVendors[Math.floor(Math.random() * webglVendors.length)],
+      webglRenderer: webglRenderers[Math.floor(Math.random() * webglRenderers.length)]
+    };
+  }
+
+  private getStealthScript(fingerprint: Fingerprint): string {
+    return `
+      (function() {
+        Object.defineProperty(navigator, 'webdriver', { get: () => undefined });
+        delete navigator.__proto__.webdriver;
+        
+        window.chrome = {
+          runtime: {
+            connect: () => ({ onMessage: { addListener: () => {} }, disconnect: () => {} }),
+            sendMessage: () => {},
+            onMessage: { addListener: () => {} },
+            onConnect: { addListener: () => {} },
+            id: '${randomUUID()}'
+          },
+          loadTimes: () => ({
+            commitLoadTime: Date.now() / 1000,
+            startLoadTime: Date.now() / 1000 - 0.5,
+            finishDocumentLoadTime: Date.now() / 1000,
+            finishLoadTime: Date.now() / 1000,
+            navigationType: 'Reload'
+          }),
+          csi: () => ({
+            startE: Date.now(),
+            onloadT: Date.now(),
+            pageT: Date.now() - 100
+          }),
+          app: { isInstalled: false }
+        };
+        
+        const originalQuery = window.navigator.permissions.query;
+        window.navigator.permissions.query = (parameters) => {
+          if (parameters.name === 'notifications') {
+            return Promise.resolve({ state: Notification.permission, onchange: null });
+          }
+          return originalQuery(parameters);
+        };
+        
+        Object.defineProperty(navigator, 'plugins', {
+          get: () => {
+            const plugins = [
+              { name: 'Chrome PDF Plugin', filename: 'internal-pdf-viewer' },
+              { name: 'Chrome PDF Viewer', filename: 'mhjfbmdgcfjbbpaeojofohoefgiehjai' },
+              { name: 'Native Client', filename: 'internal-nacl-plugin' }
+            ];
+            plugins.length = plugins.length;
+            return plugins;
+          }
+        });
+        
+        Object.defineProperty(navigator, 'languages', {
+          get: () => ${JSON.stringify(fingerprint.languages)}
+        });
+        
+        Object.defineProperty(navigator, 'hardwareConcurrency', {
+          get: () => ${fingerprint.hardwareConcurrency}
+        });
+        Object.defineProperty(navigator, 'deviceMemory', {
+          get: () => ${fingerprint.deviceMemory}
+        });
+        Object.defineProperty(navigator, 'platform', {
+          get: () => '${fingerprint.platform}'
+        });
+        
+        const getParameter = WebGLRenderingContext.prototype.getParameter;
+        WebGLRenderingContext.prototype.getParameter = function(parameter) {
+          if (parameter === 37445) return '${fingerprint.webglVendor}';
+          if (parameter === 37446) return '${fingerprint.webglRenderer}';
+          return getParameter(parameter);
+        };
+        
+        console.log('✅ Stealth mode activated');
+      })();
+    `;
+  }
+
+  async ensureProfile(profileId: string, targetUrl?: string): Promise<ProfileConfig> {
+    const profilePath = path.join(this.basePath, profileId);
+    const configPath = path.join(profilePath, 'config.json');
+    
+    if (fs.existsSync(configPath)) {
+      const config: ProfileConfig = JSON.parse(fs.readFileSync(configPath, 'utf-8'));
+      config.lastUsed = new Date().toISOString();
+      if (targetUrl) config.lastUrl = targetUrl;
+      fs.writeFileSync(configPath, JSON.stringify(config, null, 2));
+      console.log(`✅ Using existing profile: ${profileId}`);
+      return config;
+    } else {
+      const userDataDir = path.join(profilePath, 'user_data');
+      fs.mkdirSync(userDataDir, { recursive: true });
+      
+      const config: ProfileConfig = {
+        id: profileId,
+        name: `Profile_${profileId}`,
+        userDataDir: userDataDir,
+        createdAt: new Date().toISOString(),
+        lastUsed: new Date().toISOString(),
+        fingerprint: this.generateFingerprint(),
+        lastUrl: targetUrl
+      };
+      
+      fs.writeFileSync(configPath, JSON.stringify(config, null, 2));
+      console.log(`✅ Created new profile: ${profileId}`);
+      return config;
+    }
+  }
+
+  async launchProfile(profileId: string, options?: LaunchOptions): Promise<{
+    context: BrowserContext;
+    page: Page;
+  }> {
+    const config = await this.ensureProfile(profileId, options?.targetUrl);
+    
+    console.log(`🚀 Launching browser for profile: ${profileId}`);
+    
+    const context = await chromium.launchPersistentContext(config.userDataDir, {
+      headless: options?.headless ?? false,
+      viewport: config.fingerprint.viewport,
+      userAgent: config.fingerprint.userAgent,
+      locale: config.fingerprint.locale,
+      timezoneId: config.fingerprint.timezone,
+      args: [
+        '--disable-blink-features=AutomationControlled',
+        '--disable-features=ChromeWhatsNewUI,TranslateUI',
+        '--disable-default-apps',
+        '--disable-extensions',
+        '--no-first-run',
+        '--no-sandbox',
+        '--disable-dev-shm-usage',
+        `--window-size=${config.fingerprint.viewport.width},${config.fingerprint.viewport.height}`,
+        '--start-maximized'
+      ],
+      ignoreHTTPSErrors: true,
+      timeout: options?.timeout ?? 60000
+    });
+    
+    await context.addInitScript(this.getStealthScript(config.fingerprint));
+    
+    const page = await context.newPage();
+    
+    if (options?.targetUrl) {
+      await page.goto(options.targetUrl);
+    }
+    
+    this.activeContexts.set(profileId, context);
+    
+    const webdriverFlag = await page.evaluate(() => (navigator as any).webdriver);
+    if (webdriverFlag === undefined) {
+      console.log(`✅ Stealth mode active for ${profileId}`);
+    } else {
+      console.warn(`⚠️ Warning: webdriver still visible for ${profileId}`);
+    }
+    
+    return { context, page };
+  }
+
+  async launchProfileWithRestore(profileId: string, options?: LaunchOptions): Promise<{
+    context: BrowserContext;
+    page: Page;
+  }> {
+    const savedProfile = this.storage.getProfileById(profileId);
+    
+    if (savedProfile && savedProfile.cookies && savedProfile.cookies.length > 0) {
+      console.log(`🔄 Restoring session for ${savedProfile.username} from database`);
+      
+      const { context, page } = await this.launchProfile(profileId, options);
+      
+      await context.addCookies(savedProfile.cookies);
+      await page.reload();
+      
+      if (options?.targetUrl) {
+        await page.goto(options.targetUrl);
+      }
+      
+      return { context, page };
+    }
+    
+    return await this.launchProfile(profileId, options);
+  }
+
+  async extractXProfileFromPage(page: Page, profileId: string): Promise<XProfileData | null> {
+    try {
+      const cookies = await page.context().cookies();
+      const storageState = await page.context().storageState();
+      const config = await this.ensureProfile(profileId);
+      
+      const userInfo = await page.evaluate(() => {
+        const displayName = document.querySelector('[data-testid="UserName"] span')?.textContent || '';
+        const usernameElement = document.querySelector('[data-testid="UserName"] a');
+        const username = usernameElement?.textContent?.replace('@', '') || '';
+        
+        return {
+          displayName: displayName,
+          username: username,
+          isVerified: !!document.querySelector('[data-testid="icon-verified"]'),
+          avatarUrl: document.querySelector('[data-testid="Tweet-User-Avatar"] img')?.src || ''
+        };
+      });
+      
+      const url = page.url();
+      let username = userInfo.username;
+      if (!username && url.includes('/')) {
+        const match = url.match(/x\.com\/([^\/?]+)/);
+        if (match) username = match[1];
+      }
+      
+      const profileData: XProfileData = {
+        id: profileId,
+        username: username || `user_${profileId}`,
+        displayName: userInfo.displayName || username || profileId,
+        cookies: cookies,
+        storageState: storageState,
+        userDataDir: config.userDataDir,
+        isVerified: userInfo.isVerified || false,
+        followersCount: 0,
+        followingCount: 0,
+        tweetCount: 0,
+        avatarUrl: userInfo.avatarUrl,
+        lastLogin: new Date(),
+        metadata: {
+          lastExtractedAt: new Date().toISOString(),
+          url: url
+        }
+      };
+      
+      this.storage.saveProfile(profileData);
+      
+      this.storage.saveSession({
+        profileId: profileId,
+        loginTime: new Date(),
+        userAgent: await page.evaluate(() => navigator.userAgent),
+        status: 'active'
+      });
+      
+      this.storage.logActivity(profileId, 'LOGIN', 'User logged in successfully', url, true);
+      
+      return profileData;
+    } catch (error) {
+      console.error('Failed to extract X profile:', error);
+      this.storage.logActivity(profileId, 'LOGIN_ERROR', 'Failed to extract profile', undefined, false, String(error));
+      return null;
+    }
+  }
+
+  async closeProfile(profileId: string): Promise<void> {
+    const context = this.activeContexts.get(profileId);
+    if (context && !context.isClosed()) {
+      const activeSession = this.storage.getActiveSession(profileId);
+      if (activeSession) {
+        this.storage.updateSessionLogout(activeSession.id, profileId);
+      }
+      await context.close();
+      this.activeContexts.delete(profileId);
+      this.storage.logActivity(profileId, 'LOGOUT', 'Profile closed', undefined, true);
+      console.log(`🔒 Closed profile: ${profileId}`);
+    }
+  }
+
+  async closeAll(): Promise<void> {
+    const promises = Array.from(this.activeContexts.keys()).map(id => this.closeProfile(id));
+    await Promise.all(promises);
+    console.log('✅ All profiles closed');
+  }
+
+  getProfile(profileId: string): ProfileConfig | null {
+    const configPath = path.join(this.basePath, profileId, 'config.json');
+    if (fs.existsSync(configPath)) {
+      return JSON.parse(fs.readFileSync(configPath, 'utf-8'));
+    }
+    return null;
+  }
+
+  getStoredProfile(profileId: string): XProfileData | null {
+    return this.storage.getProfileById(profileId);
+  }
+
+  getStorage(): SQLiteProfileStorage {
+    return this.storage;
+  }
+}
+
+================================================================================
+FILE 5: src/main.ts (MAIN ENTRY POINT - YOUR OPTIMIZED CODE)
+================================================================================
+
+import { HumanBehavior } from './human-behavior.js';
+import { ProfileManagerWithSQLite } from './profile-manager-with-sqlite.js';
+import XActions from './x-actions.js';
+
+import { pathToFileURL } from 'node:url';
+
+import type { Page } from '@playwright/test';
+import type { XProfileData } from './sqlite-profile-storage.js';
+
+const DEFAULT_PROFILE_ID = 'profile_01_id';
+const DEFAULT_TARGET_URL = 'https://x.com';
+const DEFAULT_DB_PATH = './x_profiles.db';
+const LOGIN_DETECTION_TIMEOUT_MS = 120_000;
+
+type LauncherArgs = {
+  profileId: string;
+  targetUrl: string;
+  demoActions: boolean;
+  demoSearch: boolean;
+  dryRun: boolean;
+  likeCurrentTweet: boolean;
+};
+
+function parseArgs(argv: string[]): LauncherArgs {
+  const positionalArgs = argv.filter((arg) => !arg.startsWith('--'));
+
+  return {
+    profileId: positionalArgs[0] ?? DEFAULT_PROFILE_ID,
+    targetUrl: normalizeUrl(positionalArgs[1] ?? DEFAULT_TARGET_URL),
+    demoActions: argv.includes('--demo-actions'),
+    demoSearch: argv.includes('--demo-search'),
+    dryRun: argv.includes('--dry-run'),
+    likeCurrentTweet: argv.includes('--like-current-tweet'),
+  };
+}
+
+function normalizeUrl(rawUrl: string): string {
+  const trimmed = rawUrl.trim();
+  const repaired =
+    trimmed.startsWith('https:/') && !trimmed.startsWith('https://')
+      ? trimmed.replace('https:/', 'https://')
+      : trimmed;
+
+  return new URL(repaired).toString();
+}
+
+function isXUrl(targetUrl: string): boolean {
+  const hostname = new URL(targetUrl).hostname.toLowerCase();
+  return hostname === 'x.com' || hostname.endsWith('.x.com') || hostname === 'twitter.com';
+}
+
+function isDirectRun(): boolean {
+  const entryPoint = process.argv[1];
+  return entryPoint !== undefined && import.meta.url === pathToFileURL(entryPoint).href;
+}
+
+async function runHumanBehaviorWarmup(page: Page): Promise<void> {
+  console.log('🎭 Running human-like warmup actions...');
+
+  await HumanBehavior.delay(800, 1500);
+  await HumanBehavior.randomMouseMovement(page);
+  await HumanBehavior.delay(300, 700);
+  await HumanBehavior.randomMouseMovement(page);
+  await HumanBehavior.scroll(page, 500);
+  await HumanBehavior.delay(500, 900);
+  await HumanBehavior.scroll(page, -250);
+
+  console.log('✅ Human-like warmup actions completed.');
+}
+
+async function waitForXLoginIfNeeded(
+  page: Page,
+  storedProfile: XProfileData | undefined,
+): Promise<void> {
+  if (storedProfile) {
+    console.log(`📱 Found saved X profile in SQLite: @${storedProfile.username}`);
+    return;
+  }
+
+  console.log('🔐 No saved X profile found in SQLite.');
+  console.log('📝 If X asks for login, please log in manually in the browser window.');
+
+  try {
+    await page.waitForURL('**/home', { timeout: LOGIN_DETECTION_TIMEOUT_MS });
+    console.log('✅ Login successful, on home page.');
+  } catch {
+    console.log('⏰ Login wait timed out. Continuing with current page.');
+  }
+}
+
+async function captureXProfileIfApplicable(
+  manager: ProfileManagerWithSQLite,
+  page: Page,
+  profileId: string,
+  targetUrl: string,
+): Promise<void> {
+  if (!isXUrl(targetUrl)) return;
+
+  const storedProfile = manager.getStoredProfile(profileId);
+  await waitForXLoginIfNeeded(page, storedProfile);
+  await HumanBehavior.delay(1500, 2500);
+
+  const savedProfile = await manager.extractXProfileFromPage(page, profileId);
+  if (!savedProfile) {
+    console.log('⚠️ Could not save X profile to SQLite from the current page.');
+    return;
+  }
+
+  console.log('💾 Saved X profile to SQLite:');
+  console.log(`   Username: @${savedProfile.username}`);
+  console.log(`   Display name: ${savedProfile.displayName}`);
+  console.log(`   Cookies: ${savedProfile.cookies.length}`);
+  console.log(`   Database: ${manager.getStorage().getDatabasePath()}`);
+}
+
+export async function demoXActions(page: Page, profileUsername?: string): Promise<void> {
+  console.log('\n' + '='.repeat(60));
+  console.log('🚀 STARTING X ACTIONS DEMO');
+  console.log('='.repeat(60));
+
+  // Step 1: Navigate to Home
+  console.log('\n📌 Step 1: Navigating to Home feed...');
+  await XActions.goToHome(page);
+  
+  const feedLoaded = await XActions.waitForFeed(page, 10000);
+  if (!feedLoaded) {
+    console.log('❌ Feed did not load. Skipping demo.');
+    return;
+  }
+
+  // Step 2: Get first tweet info (SAFE)
+  console.log('\n📌 Step 2: Getting first tweet info...');
+  const firstTweet = await XActions.getFirstTweetSafe(page);
+  if (firstTweet) {
+    console.log(`   👤 Author: @${firstTweet.authorUsername}`);
+    console.log(`   💬 Text: ${firstTweet.text.substring(0, 100)}...`);
+    console.log(`   ❤️ Likes: ${firstTweet.likes ?? '0'} | 🔁 Retweets: ${firstTweet.retweets ?? '0'}`);
+  } else {
+    console.log('   ⚠️ No tweets found in feed');
+    console.log('\n' + '='.repeat(60));
+    console.log('⚠️ X ACTIONS DEMO SKIPPED - No tweets available');
+    console.log('='.repeat(60));
+    return;
+  }
+
+  // Step 3: Scroll feed
+  console.log('\n📌 Step 3: Scrolling feed...');
+  await XActions.scrollFeed(page, 2);
+
+  // Step 4: Get multiple tweets
+  console.log('\n📌 Step 4: Getting multiple tweets...');
+  const allTweets = await XActions.getAllTweets(page, 5);
+  console.log(`   📊 Found ${allTweets.length} tweets in feed`);
+
+  // Step 5: Click first tweet
+  console.log('\n📌 Step 5: Opening first tweet detail...');
+  try {
+    const clicked = await XActions.clickFirstTweet(page, true);
+    if (clicked) {
+      console.log('   ✅ Opened tweet detail');
+
+      console.log('\n📌 Step 6: Getting current tweet details...');
+      const tweetDetail = await XActions.getCurrentTweetDetail(page);
+      if (tweetDetail) {
+        console.log(`   📝 Full text: ${tweetDetail.text.substring(0, 150)}...`);
+      }
+
+      console.log('\n📌 Step 7: Going back to home...');
+      await XActions.goBack(page);
+    } else {
+      console.log('   ⚠️ Could not click first tweet');
+    }
+  } catch (error) {
+    console.error('   ❌ Error clicking tweet:', error);
+  }
+
+  // Step 8: Check notifications
+  console.log('\n📌 Step 8: Checking notifications...');
+  const unreadCount = await XActions.getUnreadCount(page);
+  console.log(`   🔔 Unread notifications: ${unreadCount}`);
+
+  // Step 9: Get user profile (if username provided)
+  if (profileUsername) {
+    console.log('\n📌 Step 9: Getting current user profile info...');
+    try {
+      const userProfile = await XActions.getUserProfile(page, profileUsername);
+      if (userProfile) {
+        console.log(`   👤 @${userProfile.username}`);
+        console.log(`   📝 Bio: ${userProfile.bio?.substring(0, 100) || 'No bio'}`);
+        console.log(`   👥 Followers: ${userProfile.followersCount}`);
+        console.log(`   Following: ${userProfile.followingCount}`);
+      }
+    } catch (error) {
+      console.error('   ❌ Error getting user profile:', error);
+    }
+  }
+
+  console.log('\n' + '='.repeat(60));
+  console.log('✅ X ACTIONS DEMO COMPLETED');
+  console.log('='.repeat(60));
+}
+
+export async function demoSearchActions(page: Page): Promise<void> {
+  console.log('\n' + '='.repeat(60));
+  console.log('🔎 SEARCH ACTIONS DEMO');
+  console.log('='.repeat(60));
+
+  const searchQuery = 'playwright automation';
+  console.log(`\n📌 Searching for: "${searchQuery}"`);
+  await XActions.search(page, searchQuery);
+
+  const feedLoaded = await XActions.waitForFeed(page, 10000);
+  if (feedLoaded) {
+    const searchResults = await XActions.getFirstTweetSafe(page);
+    if (searchResults) {
+      console.log(`   📊 First result: ${searchResults.text.substring(0, 100)}...`);
+    }
+  }
+
+  await XActions.goToHome(page);
+  
+  console.log('\n' + '='.repeat(60));
+  console.log('✅ SEARCH ACTIONS DEMO COMPLETED');
+  console.log('='.repeat(60));
+}
+
+export async function demoComposeTweet(page: Page, tweetText: string): Promise<boolean> {
+  console.log('\n' + '='.repeat(60));
+  console.log('📝 COMPOSE TWEET DEMO');
+  console.log('='.repeat(60));
+  console.log('⚠️ This posts a real tweet. It only runs when called explicitly.');
+  
+  return XActions.composeTweet(page, tweetText);
+}
+
+async function likeCurrentTweetIfRequested(page: Page, shouldLike: boolean): Promise<void> {
+  if (!shouldLike) return;
+
+  console.log('\n❤️ likeCurrentTweet flag detected.');
+
+  try {
+    if (!page.url().includes('/status/')) {
+      console.log('📌 Current page is not a tweet detail page. Opening first tweet from feed...');
+      const clicked = await XActions.clickFirstTweet(page, true);
+      if (!clicked) {
+        console.log('❌ Could not open first tweet, skipping like.');
+        return;
+      }
+    }
+
+    const liked = await XActions.likeCurrentTweet(page);
+    console.log(liked ? '✅ likeCurrentTweet completed.' : '⚠️ Tweet already liked or like button not found.');
+  } catch (error) {
+    console.error('❌ Failed to run likeCurrentTweet:', error);
+  }
+}
+
+async function runOptionalXActions(
+  page: Page,
+  manager: ProfileManagerWithSQLite,
+  profileId: string,
+  args: LauncherArgs,
+): Promise<void> {
+  if (!isXUrl(args.targetUrl)) return;
+
+  const refreshedProfile = manager.getStoredProfile(profileId);
+  if (!refreshedProfile) {
+    console.log('\n⚠️ Not logged into X yet. Skipping optional X actions.');
+    console.log('💡 Please log in manually, then run again.');
+    return;
+  }
+
+  await likeCurrentTweetIfRequested(page, args.likeCurrentTweet);
+
+  if (args.demoActions) {
+    await demoXActions(page, refreshedProfile.username);
+  }
+
+  if (args.demoSearch) {
+    await demoSearchActions(page);
+  }
+}
+
+async function main(): Promise<void> {
+  const args = parseArgs(process.argv.slice(2));
+  const manager = new ProfileManagerWithSQLite('./browser_profiles', DEFAULT_DB_PATH);
+  const metadata = await manager.ensureProfile(args.profileId, args.targetUrl);
+  const storedProfile = manager.getStoredProfile(args.profileId);
+
+  console.log(`\n📦 Opening profile ${metadata.id}`);
+  console.log(`📁 User data: ${metadata.userDataDir}`);
+  console.log(`🌐 Target URL: ${args.targetUrl}`);
+  console.log(`💾 SQLite DB: ${manager.getStorage().getDatabasePath()}`);
+  if (storedProfile) {
+    console.log(`📱 Stored X profile: @${storedProfile.username} (${storedProfile.displayName})`);
+  }
+
+  if (args.dryRun) {
+    console.log('\n✅ Dry run completed. Browser launch skipped.');
+    manager.getStorage().close();
+    return;
+  }
+
+  console.log('\n🖱️ Close the browser window or press Ctrl+C to stop.\n');
+
+  const { context, page } = await manager.launchProfileWithRestore(args.profileId, {
+    targetUrl: args.targetUrl,
+  });
+
+  await runHumanBehaviorWarmup(page);
+  await captureXProfileIfApplicable(manager, page, args.profileId, args.targetUrl);
+  await runOptionalXActions(page, manager, args.profileId, args);
+
+  console.log('\n💡 Browser will stay open. Press Ctrl+C or close the browser window to stop.');
+  await context.waitForEvent('close');
+  await manager.closeAll();
+}
+
+if (isDirectRun()) {
+  main().catch((error: unknown) => {
+    console.error('❌ Fatal error:', error);
+    process.exitCode = 1;
+  });
+}
+
+================================================================================
+FILE 6: package.json
+================================================================================
+
+{
+  "name": "playwright-x-profile-manager",
+  "version": "2.0.0",
+  "description": "Complete X/Twitter profile manager with anti-detection and SQLite storage",
+  "type": "module",
+  "main": "dist/main.js",
+  "scripts": {
+    "start": "ts-node src/main.ts",
+    "dev": "ts-node src/main.ts",
+    "demo": "ts-node src/main.ts profile_01_id https://x.com --demo-actions",
+    "search": "ts-node src/main.ts profile_01_id https://x.com --demo-search",
+    "like": "ts-node src/main.ts profile_01_id https://x.com --like-current-tweet",
+    "full": "ts-node src/main.ts profile_01_id https://x.com --demo-actions --demo-search --like-current-tweet",
+    "dry": "ts-node src/main.ts profile_01_id https://x.com --dry-run",
+    "build": "tsc",
+    "db:view": "sqlite3 x_profiles.db \"SELECT id, username, display_name, last_login FROM profiles;\"",
+    "db:cookies": "sqlite3 x_profiles.db \"SELECT id, username, json_array_length(cookies_json) as cookie_count FROM profiles;\"",
+    "clean": "rm -rf dist browser_profiles x_profiles.db"
+  },
+  "dependencies": {
+    "playwright": "^1.40.0",
+    "better-sqlite3": "^9.0.0"
+  },
+  "devDependencies": {
+    "@types/node": "^20.10.0",
+    "@types/better-sqlite3": "^7.6.8",
+    "typescript": "^5.3.0",
+    "ts-node": "^10.9.0"
+  }
+}
+
+================================================================================
+FILE 7: tsconfig.json
+================================================================================
+
+{
+  "compilerOptions": {
+    "target": "ES2020",
+    "module": "ESNext",
+    "moduleResolution": "bundler",
+    "lib": ["ES2020", "DOM"],
+    "outDir": "./dist",
+    "rootDir": "./src",
+    "strict": true,
+    "esModuleInterop": true,
+    "skipLibCheck": true,
+    "forceConsistentCasingInFileNames": true,
+    "resolveJsonModule": true,
+    "allowJs": true,
+    "declaration": true,
+    "declarationMap": true
+  },
+  "include": ["src/**/*"],
+  "exclude": ["node_modules", "dist", "browser_profiles"]
+}
+
+================================================================================
+HOW TO USE - COMPLETE INSTRUCTIONS
+================================================================================
+
+1. CREATE PROJECT FOLDER:
+-------------------------------------------------------------------------------
+mkdir my-x-project
+cd my-x-project
+
+2. CREATE ALL FILES ABOVE IN src/ FOLDER:
+-------------------------------------------------------------------------------
+src/
+├── sqlite-profile-storage.ts
+├── human-behavior.ts
+├── x-actions.ts
+├── profile-manager-with-sqlite.ts
+├── main.ts
+
+3. CREATE package.json AND tsconfig.json IN ROOT FOLDER
+
+4. INSTALL DEPENDENCIES:
+-------------------------------------------------------------------------------
+npm install
+npx playwright install chromium
+
+5. RUN FOR FIRST TIME (MANUAL LOGIN):
+-------------------------------------------------------------------------------
+npm start profile_01_id https://x.com
+
+Then login manually in the browser window.
+After login, profile will be saved to SQLite automatically.
+
+6. RUN WITH DEMO ACTIONS (AFTER LOGIN):
+-------------------------------------------------------------------------------
+npm run demo
+
+7. RUN SEARCH DEMO:
+-------------------------------------------------------------------------------
+npm run search
+
+8. RUN LIKE TWEET:
+-------------------------------------------------------------------------------
+npm run like
+
+9. RUN ALL ACTIONS:
+-------------------------------------------------------------------------------
+npm run full
+
+10. DRY RUN (NO BROWSER):
+-------------------------------------------------------------------------------
+npm run dry
+
+11. CHECK DATABASE:
+-------------------------------------------------------------------------------
+npm run db:view
+npm run db:cookies
+
+12. CLEAN EVERYTHING:
+-------------------------------------------------------------------------------
+npm run clean
+
+================================================================================
+COMMAND LINE OPTIONS SUMMARY
+================================================================================
+
+┌─────────────────────────────────────────────────────────────────────────────┐
+│ Option                    │ Description                                      │
+├───────────────────────────┼──────────────────────────────────────────────────┤
+│ --demo-actions            │ Run full X actions demo (read tweets, scroll)   │
+│ --demo-search             │ Run search demo                                  │
+│ --like-current-tweet      │ Like the first tweet in feed                    │
+│ --dry-run                 │ Preview only, no browser launch                  │
+│ profile_01_id             │ Custom profile ID (optional, default)           │
+│ https://x.com             │ Custom target URL (optional, default)           │
+└───────────────────────────┴──────────────────────────────────────────────────┘
+
+================================================================================
+EXAMPLE COMMANDS
+================================================================================
+
+# Basic usage
+npm start
+
+# Custom profile and URL
+npm start my_profile https://x.com
+
+# Run with all features
+npm start profile_01_id https://x.com --demo-actions --demo-search --like-current-tweet
+
+# Dry run to check configuration
+npm start profile_01_id https://x.com --dry-run
+
+================================================================================
+TROUBLESHOOTING
+================================================================================
+
+Issue: "Cannot find module"
+Solution: Make sure all files are in src/ folder and run npm install
+
+Issue: "Profile not found in database"
+Solution: Run without --demo-actions first to login manually
+
+Issue: "Browser closed unexpectedly"
+Solution: Increase memory or close other applications
+
+Issue: "SQLITE_ERROR: no such table"
+Solution: Delete x_profiles.db and run again (will recreate)
+
+================================================================================
+END OF FILE
+================================================================================

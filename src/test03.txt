@@ -1,0 +1,716 @@
+================================================================================
+                    LƯU PROFILE X (TWITTER) VÀO SQLITE
+                    HƯỚNG DẪN ĐẦY ĐỦ CHO PLAYWRIGHT
+================================================================================
+
+Dựa trên code hiện tại của bạn đã có ProfileManager và đăng nhập X thành công,
+đây là giải pháp lưu trữ thông tin profile vào SQLite database.
+
+================================================================================
+1. KIẾN TRÚC DỮ LIỆU SQLITE
+================================================================================
+
+Bảng profiles - Lưu thông tin chính của từng profile X:
+
+┌─────────────────────────────────────────────────────────────────────────────┐
+│ Column              │ Type      │ Description                               │
+├─────────────────────┼───────────┼───────────────────────────────────────────┤
+│ id                  │ TEXT(PK)  │ Profile ID (profile_01_id)                │
+│ username            │ TEXT      │ X username (@elonmusk)                    │
+│ display_name        │ TEXT      │ Tên hiển thị (Elon Musk)                  │
+│ email               │ TEXT      │ Email đăng nhập                           │
+│ user_id             │ TEXT      │ X user ID (số)                            │
+│ cookies_json        │ TEXT      │ Cookies dạng JSON                         │
+│ storage_state_json  │ TEXT      │ Storage state (localStorage, session)     │
+│ user_data_dir       │ TEXT      │ Đường dẫn thư mục user_data               │
+│ is_verified         │ INTEGER   │ 0/1 - Có verified không                   │
+│ followers_count     │ INTEGER   │ Số followers                              │
+│ following_count     │ INTEGER   │ Số following                              │
+│ tweet_count         │ INTEGER   │ Số tweet                                  │
+│ avatar_url          │ TEXT      │ URL avatar                                │
+│ banner_url          │ TEXT      │ URL banner                                │
+│ last_login          │ DATETIME  │ Lần cuối đăng nhập                        │
+│ created_at          │ DATETIME  │ Thời gian tạo profile                     │
+│ is_active           │ INTEGER   │ 0/1 - Profile còn dùng không              │
+│ metadata_json       │ TEXT      │ Metadata mở rộng (JSON)                   │
+└─────────────────────────────────────────────────────────────────────────────┘
+
+Bảng sessions - Lưu lịch sử đăng nhập:
+
+┌─────────────────────────────────────────────────────────────────────────────┐
+│ Column              │ Type      │ Description                               │
+├─────────────────────┼───────────┼───────────────────────────────────────────┤
+│ id                  │ INTEGER(PK)│ Auto increment                           │
+│ profile_id          │ TEXT(FK)  │ Tham chiếu đến profiles.id                │
+│ login_time          │ DATETIME  │ Thời gian đăng nhập                       │
+│ logout_time         │ DATETIME  │ Thời gian đăng xuất                       │
+│ ip_address          │ TEXT      │ IP address (nếu có proxy)                 │
+│ user_agent          │ TEXT      │ User agent sử dụng                        │
+│ session_duration    │ INTEGER   │ Thời gian session (giây)                  │
+│ status              │ TEXT      │ active/expired/revoked                    │
+└─────────────────────────────────────────────────────────────────────────────┘
+
+Bảng tweets_cache - Cache tweets đã đọc (tùy chọn):
+
+┌─────────────────────────────────────────────────────────────────────────────┐
+│ Column              │ Type      │ Description                               │
+├─────────────────────┼───────────┼───────────────────────────────────────────┤
+│ id                  │ TEXT(PK)  │ Tweet ID                                  │
+│ profile_id          │ TEXT(FK)  │ Profile đã đọc tweet                      │
+│ author_username     │ TEXT      │ Username tác giả                          │
+│ tweet_text          │ TEXT      │ Nội dung tweet                            │
+│ likes_count         │ INTEGER   │ Số like                                   │
+│ retweets_count      │ INTEGER   │ Số retweet                                │
+│ replies_count       │ INTEGER   │ Số reply                                  │
+│ views_count         │ INTEGER   │ Số view                                   │
+│ fetched_at          │ DATETIME  │ Thời gian lấy tweet                       │
+│ raw_json            │ TEXT      │ Dữ liệu thô dạng JSON                     │
+└─────────────────────────────────────────────────────────────────────────────┘
+
+================================================================================
+2. CÀI ĐẶT DEPENDENCIES
+================================================================================
+
+npm install better-sqlite3
+npm install --save-dev @types/better-sqlite3
+
+Hoặc dùng sqlite3 (async):
+npm install sqlite3 sqlite
+
+================================================================================
+3. CODE HOÀN CHỈNH - sqlite-profile-storage.ts
+================================================================================
+
+// File: src/sqlite-profile-storage.ts
+import Database from 'better-sqlite3';
+import * as fs from 'fs';
+import * as path from 'path';
+
+export interface XProfileData {
+  id: string;
+  username: string;
+  displayName: string;
+  email?: string;
+  userId?: string;
+  cookies: any[];
+  storageState?: any;
+  userDataDir: string;
+  isVerified: boolean;
+  followersCount: number;
+  followingCount: number;
+  tweetCount: number;
+  avatarUrl?: string;
+  bannerUrl?: string;
+  metadata?: Record<string, any>;
+}
+
+export interface SessionRecord {
+  profileId: string;
+  loginTime: Date;
+  ipAddress?: string;
+  userAgent?: string;
+  status: 'active' | 'expired' | 'revoked';
+}
+
+export class SQLiteProfileStorage {
+  private db: Database.Database;
+  private dbPath: string;
+
+  constructor(dbPath: string = './x_profiles.db') {
+    this.dbPath = dbPath;
+    this.db = new Database(dbPath);
+    this.initTables();
+    console.log(`✅ SQLite database initialized: ${dbPath}`);
+  }
+
+  private initTables(): void {
+    // Bảng profiles
+    this.db.exec(`
+      CREATE TABLE IF NOT EXISTS profiles (
+        id TEXT PRIMARY KEY,
+        username TEXT NOT NULL,
+        display_name TEXT NOT NULL,
+        email TEXT,
+        user_id TEXT,
+        cookies_json TEXT NOT NULL,
+        storage_state_json TEXT,
+        user_data_dir TEXT NOT NULL,
+        is_verified INTEGER DEFAULT 0,
+        followers_count INTEGER DEFAULT 0,
+        following_count INTEGER DEFAULT 0,
+        tweet_count INTEGER DEFAULT 0,
+        avatar_url TEXT,
+        banner_url TEXT,
+        last_login DATETIME,
+        created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+        is_active INTEGER DEFAULT 1,
+        metadata_json TEXT,
+        UNIQUE(username, user_data_dir)
+      )
+    `);
+
+    // Bảng sessions
+    this.db.exec(`
+      CREATE TABLE IF NOT EXISTS sessions (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        profile_id TEXT NOT NULL,
+        login_time DATETIME DEFAULT CURRENT_TIMESTAMP,
+        logout_time DATETIME,
+        ip_address TEXT,
+        user_agent TEXT,
+        session_duration INTEGER,
+        status TEXT DEFAULT 'active',
+        FOREIGN KEY (profile_id) REFERENCES profiles(id) ON DELETE CASCADE
+      )
+    `);
+
+    // Bảng tweets_cache
+    this.db.exec(`
+      CREATE TABLE IF NOT EXISTS tweets_cache (
+        id TEXT PRIMARY KEY,
+        profile_id TEXT NOT NULL,
+        author_username TEXT,
+        tweet_text TEXT,
+        likes_count INTEGER DEFAULT 0,
+        retweets_count INTEGER DEFAULT 0,
+        replies_count INTEGER DEFAULT 0,
+        views_count INTEGER DEFAULT 0,
+        fetched_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+        raw_json TEXT,
+        FOREIGN KEY (profile_id) REFERENCES profiles(id) ON DELETE CASCADE
+      )
+    `);
+
+    // Indexes cho tối ưu query
+    this.db.exec(`
+      CREATE INDEX IF NOT EXISTS idx_profiles_username ON profiles(username);
+      CREATE INDEX IF NOT EXISTS idx_profiles_last_login ON profiles(last_login);
+      CREATE INDEX IF NOT EXISTS idx_sessions_profile_id ON sessions(profile_id);
+      CREATE INDEX IF NOT EXISTS idx_sessions_status ON sessions(status);
+      CREATE INDEX IF NOT EXISTS idx_tweets_profile_id ON tweets_cache(profile_id);
+      CREATE INDEX IF NOT EXISTS idx_tweets_fetched_at ON tweets_cache(fetched_at);
+    `);
+
+    console.log('✅ Database tables initialized');
+  }
+
+  /**
+   * Lưu hoặc cập nhật profile X vào database
+   */
+  saveProfile(profileData: XProfileData): void {
+    const stmt = this.db.prepare(`
+      INSERT OR REPLACE INTO profiles (
+        id, username, display_name, email, user_id, cookies_json, 
+        storage_state_json, user_data_dir, is_verified, followers_count,
+        following_count, tweet_count, avatar_url, banner_url, 
+        last_login, metadata_json, is_active
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    `);
+
+    stmt.run(
+      profileData.id,
+      profileData.username,
+      profileData.displayName,
+      profileData.email || null,
+      profileData.userId || null,
+      JSON.stringify(profileData.cookies),
+      profileData.storageState ? JSON.stringify(profileData.storageState) : null,
+      profileData.userDataDir,
+      profileData.isVerified ? 1 : 0,
+      profileData.followersCount || 0,
+      profileData.followingCount || 0,
+      profileData.tweetCount || 0,
+      profileData.avatarUrl || null,
+      profileData.bannerUrl || null,
+      new Date().toISOString(),
+      profileData.metadata ? JSON.stringify(profileData.metadata) : null,
+      1
+    );
+
+    console.log(`✅ Saved profile: ${profileData.username} (${profileData.id})`);
+  }
+
+  /**
+   * Lấy profile theo ID
+   */
+  getProfileById(profileId: string): XProfileData | null {
+    const stmt = this.db.prepare('SELECT * FROM profiles WHERE id = ? AND is_active = 1');
+    const row = stmt.get(profileId) as any;
+    
+    if (!row) return null;
+    
+    return {
+      id: row.id,
+      username: row.username,
+      displayName: row.display_name,
+      email: row.email,
+      userId: row.user_id,
+      cookies: JSON.parse(row.cookies_json),
+      storageState: row.storage_state_json ? JSON.parse(row.storage_state_json) : undefined,
+      userDataDir: row.user_data_dir,
+      isVerified: row.is_verified === 1,
+      followersCount: row.followers_count,
+      followingCount: row.following_count,
+      tweetCount: row.tweet_count,
+      avatarUrl: row.avatar_url,
+      bannerUrl: row.banner_url,
+      metadata: row.metadata_json ? JSON.parse(row.metadata_json) : undefined
+    };
+  }
+
+  /**
+   * Lấy profile theo username
+   */
+  getProfileByUsername(username: string): XProfileData | null {
+    const stmt = this.db.prepare('SELECT * FROM profiles WHERE username = ? AND is_active = 1');
+    const row = stmt.get(username) as any;
+    
+    if (!row) return null;
+    
+    return {
+      id: row.id,
+      username: row.username,
+      displayName: row.display_name,
+      email: row.email,
+      userId: row.user_id,
+      cookies: JSON.parse(row.cookies_json),
+      storageState: row.storage_state_json ? JSON.parse(row.storage_state_json) : undefined,
+      userDataDir: row.user_data_dir,
+      isVerified: row.is_verified === 1,
+      followersCount: row.followers_count,
+      followingCount: row.following_count,
+      tweetCount: row.tweet_count,
+      avatarUrl: row.avatar_url,
+      bannerUrl: row.banner_url,
+      metadata: row.metadata_json ? JSON.parse(row.metadata_json) : undefined
+    };
+  }
+
+  /**
+   * Lấy danh sách tất cả profiles
+   */
+  getAllProfiles(): XProfileData[] {
+    const stmt = this.db.prepare('SELECT * FROM profiles WHERE is_active = 1 ORDER BY last_login DESC');
+    const rows = stmt.all() as any[];
+    
+    return rows.map(row => ({
+      id: row.id,
+      username: row.username,
+      displayName: row.display_name,
+      email: row.email,
+      userId: row.user_id,
+      cookies: JSON.parse(row.cookies_json),
+      storageState: row.storage_state_json ? JSON.parse(row.storage_state_json) : undefined,
+      userDataDir: row.user_data_dir,
+      isVerified: row.is_verified === 1,
+      followersCount: row.followers_count,
+      followingCount: row.following_count,
+      tweetCount: row.tweet_count,
+      avatarUrl: row.avatar_url,
+      bannerUrl: row.banner_url,
+      metadata: row.metadata_json ? JSON.parse(row.metadata_json) : undefined
+    }));
+  }
+
+  /**
+   * Lưu session đăng nhập
+   */
+  saveSession(session: SessionRecord): number {
+    const stmt = this.db.prepare(`
+      INSERT INTO sessions (profile_id, login_time, ip_address, user_agent, status)
+      VALUES (?, ?, ?, ?, ?)
+    `);
+    
+    const result = stmt.run(
+      session.profileId,
+      session.loginTime.toISOString(),
+      session.ipAddress || null,
+      session.userAgent || null,
+      session.status
+    );
+    
+    console.log(`✅ Saved session for profile: ${session.profileId}`);
+    return result.lastInsertRowid as number;
+  }
+
+  /**
+   * Cập nhật thời gian logout cho session
+   */
+  updateSessionLogout(sessionId: number, profileId: string): void {
+    const stmt = this.db.prepare(`
+      UPDATE sessions 
+      SET logout_time = ?, session_duration = ?, status = 'expired'
+      WHERE id = ? AND profile_id = ?
+    `);
+    
+    const now = new Date();
+    const session = this.db.prepare('SELECT login_time FROM sessions WHERE id = ?').get(sessionId) as any;
+    
+    if (session) {
+      const duration = Math.floor((now.getTime() - new Date(session.login_time).getTime()) / 1000);
+      stmt.run(now.toISOString(), duration, sessionId, profileId);
+    }
+  }
+
+  /**
+   * Lấy session đang active của profile
+   */
+  getActiveSession(profileId: string): any | null {
+    const stmt = this.db.prepare(`
+      SELECT * FROM sessions 
+      WHERE profile_id = ? AND status = 'active' 
+      ORDER BY login_time DESC LIMIT 1
+    `);
+    return stmt.get(profileId);
+  }
+
+  /**
+   * Lưu tweet vào cache
+   */
+  saveTweetCache(
+    tweetId: string,
+    profileId: string,
+    authorUsername: string,
+    tweetText: string,
+    stats: { likes: number; retweets: number; replies: number; views: number },
+    rawJson?: any
+  ): void {
+    const stmt = this.db.prepare(`
+      INSERT OR REPLACE INTO tweets_cache (
+        id, profile_id, author_username, tweet_text, 
+        likes_count, retweets_count, replies_count, views_count, raw_json
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+    `);
+    
+    stmt.run(
+      tweetId,
+      profileId,
+      authorUsername,
+      tweetText.slice(0, 5000), // Giới hạn độ dài
+      stats.likes,
+      stats.retweets,
+      stats.replies,
+      stats.views,
+      rawJson ? JSON.stringify(rawJson) : null
+    );
+    
+    console.log(`✅ Cached tweet: ${tweetId}`);
+  }
+
+  /**
+   * Xóa profile (soft delete)
+   */
+  deleteProfile(profileId: string, softDelete: boolean = true): void {
+    if (softDelete) {
+      const stmt = this.db.prepare('UPDATE profiles SET is_active = 0 WHERE id = ?');
+      stmt.run(profileId);
+      console.log(`✅ Soft deleted profile: ${profileId}`);
+    } else {
+      const stmt = this.db.prepare('DELETE FROM profiles WHERE id = ?');
+      stmt.run(profileId);
+      console.log(`✅ Permanently deleted profile: ${profileId}`);
+    }
+  }
+
+  /**
+   * Export toàn bộ database ra file JSON
+   */
+  exportToJSON(outputPath: string): void {
+    const profiles = this.getAllProfiles();
+    const sessions = this.db.prepare('SELECT * FROM sessions').all();
+    const tweets = this.db.prepare('SELECT * FROM tweets_cache').all();
+    
+    const exportData = {
+      exportedAt: new Date().toISOString(),
+      profiles,
+      sessions,
+      tweets
+    };
+    
+    fs.writeFileSync(outputPath, JSON.stringify(exportData, null, 2));
+    console.log(`✅ Exported database to: ${outputPath}`);
+  }
+
+  /**
+   * Đóng database connection
+   */
+  close(): void {
+    this.db.close();
+    console.log('🔒 Database connection closed');
+  }
+}
+
+================================================================================
+4. TÍCH HỢP VỚI PROFILE MANAGER HIỆN TẠI
+================================================================================
+
+// File: src/profile-manager-with-sqlite.ts
+import { ProfileManager } from './profile-manager.js';
+import { SQLiteProfileStorage, XProfileData } from './sqlite-profile-storage.js';
+import { Page } from 'playwright';
+
+export class ProfileManagerWithSQLite extends ProfileManager {
+  private storage: SQLiteProfileStorage;
+  
+  constructor(basePath: string = './browser_profiles', dbPath: string = './x_profiles.db') {
+    super(basePath);
+    this.storage = new SQLiteProfileStorage(dbPath);
+  }
+
+  /**
+   * Lấy thông tin X profile từ page sau khi đăng nhập
+   */
+  async extractXProfileFromPage(page: Page, profileId: string): Promise<XProfileData | null> {
+    try {
+      // Lấy cookies hiện tại
+      const cookies = await page.context().cookies();
+      
+      // Lấy storage state
+      const storageState = await page.context().storageState();
+      
+      // Lấy thông tin user từ DOM
+      const userInfo = await page.evaluate(() => {
+        // Lấy từ profile dropdown hoặc từ trang chính
+        const displayName = document.querySelector('[data-testid="UserName"] span')?.textContent || '';
+        const username = document.querySelector('[data-testid="UserName"] a')?.textContent || '';
+        
+        // Hoặc từ trang settings
+        return {
+          displayName: displayName,
+          username: username.replace('@', ''),
+          isVerified: !!document.querySelector('[data-testid="icon-verified"]'),
+          avatarUrl: document.querySelector('[data-testid="Tweet-User-Avatar"] img')?.src || ''
+        };
+      });
+      
+      // Fallback: lấy từ URL
+      const url = page.url();
+      let username = userInfo.username;
+      if (!username && url.includes('/')) {
+        const match = url.match(/x\.com\/([^\/?]+)/);
+        if (match) username = match[1];
+      }
+      
+      const config = this.getProfile(profileId);
+      if (!config) return null;
+      
+      const profileData: XProfileData = {
+        id: profileId,
+        username: username || `user_${profileId}`,
+        displayName: userInfo.displayName || username || profileId,
+        cookies: cookies,
+        storageState: storageState,
+        userDataDir: config.userDataDir,
+        isVerified: userInfo.isVerified || false,
+        followersCount: 0,
+        followingCount: 0,
+        tweetCount: 0,
+        avatarUrl: userInfo.avatarUrl,
+        metadata: {
+          lastExtractedAt: new Date().toISOString(),
+          url: url
+        }
+      };
+      
+      // Lưu vào database
+      this.storage.saveProfile(profileData);
+      
+      // Lưu session
+      this.storage.saveSession({
+        profileId: profileId,
+        loginTime: new Date(),
+        userAgent: await page.evaluate(() => navigator.userAgent),
+        status: 'active'
+      });
+      
+      return profileData;
+    } catch (error) {
+      console.error('Failed to extract X profile:', error);
+      return null;
+    }
+  }
+
+  /**
+   * Khôi phục cookies từ database trước khi launch
+   */
+  async launchProfileWithRestore(profileId: string, options?: { targetUrl?: string }): Promise<{ context: any; page: Page }> {
+    // Kiểm tra xem có profile trong database không
+    const savedProfile = this.storage.getProfileById(profileId);
+    
+    if (savedProfile && savedProfile.cookies.length > 0) {
+      console.log(`🔄 Restoring session for ${savedProfile.username} from database`);
+      
+      // Launch context trước
+      const { context, page } = await super.launchProfile(profileId, options);
+      
+      // Add cookies từ database
+      await context.addCookies(savedProfile.cookies);
+      
+      // Reload page để cookies có hiệu lực
+      await page.reload();
+      
+      return { context, page };
+    }
+    
+    // Nếu không có trong DB, launch bình thường
+    return await super.launchProfile(profileId, options);
+  }
+
+  /**
+   * Lấy danh sách tất cả profiles đã lưu trong database
+   */
+  getStoredProfiles(): XProfileData[] {
+    return this.storage.getAllProfiles();
+  }
+
+  /**
+   * Lấy profile từ database
+   */
+  getStoredProfile(profileId: string): XProfileData | null {
+    return this.storage.getProfileById(profileId);
+  }
+
+  /**
+   * Đóng kết nối database
+   */
+  async closeAll(): Promise<void> {
+    await super.closeAll();
+    this.storage.close();
+  }
+
+  getStorage(): SQLiteProfileStorage {
+    return this.storage;
+  }
+}
+
+================================================================================
+5. CODE SỬ DỤNG HOÀN CHỈNH
+================================================================================
+
+// File: src/main-with-storage.ts
+import { ProfileManagerWithSQLite } from './profile-manager-with-sqlite.js';
+import { HumanBehavior } from './human-behavior.js';
+
+async function main() {
+  const manager = new ProfileManagerWithSQLite('./browser_profiles', './x_profiles.db');
+  const profileId = 'profile_01_id';
+  
+  // Kiểm tra xem đã có profile trong DB chưa
+  const existingProfile = manager.getStoredProfile(profileId);
+  
+  if (existingProfile) {
+    console.log(`📱 Found existing profile in database:`);
+    console.log(`   Username: @${existingProfile.username}`);
+    console.log(`   Name: ${existingProfile.displayName}`);
+    console.log(`   Verified: ${existingProfile.isVerified ? '✅ Yes' : 'No'}`);
+    console.log(`   Last login: ${existingProfile.metadata?.lastExtractedAt}`);
+    
+    // Khôi phục session
+    const { page } = await manager.launchProfileWithRestore(profileId, {
+      targetUrl: 'https://x.com/home'
+    });
+    
+    console.log('✅ Session restored! You are logged in.');
+    await HumanBehavior.delay(3000, 5000);
+    
+  } else {
+    console.log('📦 No saved profile found. Logging in...');
+    
+    // Launch và đăng nhập thủ công lần đầu
+    const { page } = await manager.launchProfile(profileId, {
+      targetUrl: 'https://x.com/login'
+    });
+    
+    console.log('\n🔐 Please log in manually in the browser window...');
+    console.log('Waiting for login to complete...');
+    
+    // Chờ user đăng nhập (kiểm tra bằng URL hoặc element)
+    await page.waitForURL('**/home', { timeout: 120000 });
+    console.log('✅ Login detected!');
+    
+    await HumanBehavior.delay(3000, 5000);
+    
+    // Lưu thông tin profile vào database
+    const savedProfile = await manager.extractXProfileFromPage(page, profileId);
+    
+    if (savedProfile) {
+      console.log(`\n💾 Profile saved to database:`);
+      console.log(`   Username: @${savedProfile.username}`);
+      console.log(`   Display name: ${savedProfile.displayName}`);
+      console.log(`   Cookies: ${savedProfile.cookies.length} items`);
+    }
+  }
+  
+  // Tiếp tục làm việc với X
+  console.log('\n📊 Fetching your profile info...');
+  const { page } = await manager.launchProfileWithRestore(profileId);
+  
+  // Đi đến profile page
+  const profile = manager.getStoredProfile(profileId);
+  if (profile) {
+    await page.goto(`https://x.com/${profile.username}`);
+    await HumanBehavior.delay(2000, 3000);
+    
+    // Lấy thông tin stats
+    const stats = await page.evaluate(() => {
+      const statsElements = document.querySelectorAll('[data-testid="UserStats"]');
+      const stats: any = {};
+      statsElements.forEach(el => {
+        const text = el.textContent || '';
+        if (text.includes('Posts')) stats.posts = text;
+        if (text.includes('Followers')) stats.followers = text;
+        if (text.includes('Following')) stats.following = text;
+      });
+      return stats;
+    });
+    
+    console.log(`📈 Stats for @${profile.username}:`, stats);
+  }
+  
+  // Giữ browser mở
+  console.log('\n💡 Browser will stay open. Press Ctrl+C to exit.');
+  await new Promise(() => {});
+}
+
+main().catch(console.error);
+
+================================================================================
+6. CÁC LỆNH SQL HỮU ÍCH ĐỂ QUẢN LÝ
+================================================================================
+
+-- Xem tất cả profiles
+SELECT id, username, display_name, is_verified, last_login 
+FROM profiles 
+WHERE is_active = 1 
+ORDER BY last_login DESC;
+
+-- Xem lịch sử đăng nhập của một profile
+SELECT * FROM sessions 
+WHERE profile_id = 'profile_01_id' 
+ORDER BY login_time DESC;
+
+-- Xem tweets đã cache
+SELECT id, author_username, tweet_text, likes_count, fetched_at 
+FROM tweets_cache 
+WHERE profile_id = 'profile_01_id' 
+ORDER BY fetched_at DESC 
+LIMIT 10;
+
+-- Thống kê số lượng profiles
+SELECT COUNT(*) as total_profiles, 
+       SUM(is_verified) as verified_count 
+FROM profiles 
+WHERE is_active = 1;
+
+-- Tìm profile theo email
+SELECT id, username, display_name 
+FROM profiles 
+WHERE email LIKE '%@gmail.com';
+
+================================================================================
+7. BACKUP & RESTORE DATABASE
+================================================================================
+
+Backup:
+```bash
+cp x_profiles.db x_profiles_backup_$(date +%Y%m%d).db

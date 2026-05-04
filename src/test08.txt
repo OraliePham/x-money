@@ -1,0 +1,273 @@
+Bạn nói hoàn toàn **CHÍNH XÁC**! Tôi đã phân tích sai selector. Cảm ơn bạn đã phát hiện!
+
+Trong HTML bạn cung cấp, username thực sự nằm trong **`href` attribute của thẻ `<a>`**, không phải trong `<span>` như tôi đã lấy.
+
+## 🔧 **Sửa lỗi - Lấy đúng username từ href**
+
+```typescript
+// FIXED VERSION - Lấy username CHÍNH XÁC từ href
+private static async extractVerifiedUsersFromComments(
+  page: Page,
+  maxComments: number,
+  tweetId: string
+): Promise<VerifiedUserInfo[]> {
+  return await page.evaluate((max, tweetId) => {
+    const articles = Array.from(document.querySelectorAll('article[data-testid="tweet"]'));
+    const replies = articles.slice(1, max + 1);
+    
+    const verifiedUsers: any[] = [];
+
+    for (const article of replies) {
+      // Kiểm tra verified badges
+      const hasBlueBadge = article.querySelector('[data-testid="icon-verified"]');
+      const hasGoldBadge = article.querySelector('[data-testid="icon-verified-gold"]');
+      const hasGreyBadge = article.querySelector('[data-testid="icon-verified-grey"]');
+      
+      if (!hasBlueBadge && !hasGoldBadge && !hasGreyBadge) {
+        continue;
+      }
+
+      // === CÁCH LẤY USERNAME CHÍNH XÁC ===
+      // Cách 1: Lấy từ href trong User-Name
+      const userNameLink = article.querySelector('[data-testid="User-Name"] a[href*="/"]');
+      let username = '';
+      
+      if (userNameLink) {
+        const href = userNameLink.getAttribute('href');
+        if (href) {
+          // href có dạng "/username" hoặc "/username/status/..."
+          username = href.split('/')[1]?.split('?')[0] || '';
+        }
+      }
+      
+      // Cách 2: Fallback - lấy từ avatar container
+      if (!username) {
+        const avatarContainer = article.querySelector('[data-testid="Tweet-User-Avatar"] a');
+        if (avatarContainer) {
+          const href = avatarContainer.getAttribute('href');
+          if (href) {
+            username = href.split('/')[1]?.split('?')[0] || '';
+          }
+        }
+      }
+      
+      // Cách 3: Fallback cuối - lấy từ bất kỳ link nào có chứa /username format
+      if (!username) {
+        const anyUserLink = article.querySelector('a[href^="/"][href*="/"]:not([href*="/status/"])');
+        if (anyUserLink) {
+          const href = anyUserLink.getAttribute('href');
+          if (href && href.startsWith('/') && href.length > 1) {
+            username = href.substring(1).split('/')[0];
+          }
+        }
+      }
+
+      // Lấy display name (tên hiển thị, khác với username)
+      let displayName = '';
+      const nameSpan = article.querySelector('[data-testid="User-Name"] a span span');
+      if (nameSpan) {
+        displayName = nameSpan.textContent?.trim() || '';
+      }
+      
+      // Nếu không có display name, thử selector khác
+      if (!displayName) {
+        const altNameSpan = article.querySelector('[data-testid="User-Name"] div[dir="ltr"] span:first-child');
+        displayName = altNameSpan?.textContent?.trim() || username;
+      }
+
+      // Lấy comment text
+      const commentText = article.querySelector('[data-testid="tweetText"]')?.textContent?.trim() || '';
+      
+      // Lấy timestamp
+      const commentTimestamp = article.querySelector('time')?.getAttribute('datetime') || new Date().toISOString();
+      
+      // Lấy comment URL
+      const commentPath = article.querySelector('a[href*="/status/"]')?.getAttribute('href') || '';
+      const commentUrl = commentPath ? `https://x.com${commentPath}` : '';
+      
+      // Lấy avatar URL
+      const avatarImg = article.querySelector<HTMLImageElement>('[data-testid="Tweet-User-Avatar"] img');
+      const avatarUrl = avatarImg?.src || null;
+      
+      // Lấy profile ID từ avatar container
+      const avatarContainerDiv = article.querySelector('[data-testid="UserAvatar-Container"]');
+      let profileId = '';
+      if (avatarContainerDiv) {
+        const testId = avatarContainerDiv.getAttribute('data-testid');
+        if (testId) {
+          profileId = testId.replace('UserAvatar-Container-', '');
+        }
+      }
+
+      if (username) {
+        // Xác định loại verified
+        let verifiedType: 'blue' | 'gold' | 'grey' | null = null;
+        if (hasBlueBadge) verifiedType = 'blue';
+        if (hasGoldBadge) verifiedType = 'gold';
+        if (hasGreyBadge) verifiedType = 'grey';
+
+        verifiedUsers.push({
+          profileId: profileId || username,
+          username: username, // Đã là username chính xác, không có @
+          displayName: displayName || username,
+          verifiedType,
+          commentText,
+          commentTimestamp,
+          commentUrl,
+          avatarUrl,
+          tweetId
+        });
+      }
+    }
+
+    return verifiedUsers;
+  }, maxComments, tweetId);
+}
+```
+
+## 📝 **Phiên bản cải tiến với nhiều fallback methods**
+
+```typescript
+// Version 2.0 - Robust username extraction với nhiều phương pháp
+private static async extractUsernameFromArticle(article: Element): Promise<string> {
+  // Method 1: Lấy từ User-Name section
+  const userNameSection = article.querySelector('[data-testid="User-Name"]');
+  if (userNameSection) {
+    // Tìm tất cả các link trong User-Name
+    const links = userNameSection.querySelectorAll('a[href^="/"]');
+    for (const link of links) {
+      const href = link.getAttribute('href');
+      if (href && href.length > 1 && !href.includes('/status/')) {
+        const match = href.match(/^\/([^/?]+)/);
+        if (match) return match[1];
+      }
+    }
+  }
+  
+  // Method 2: Lấy từ avatar link
+  const avatarLink = article.querySelector('[data-testid="Tweet-User-Avatar"] a');
+  if (avatarLink) {
+    const href = avatarLink.getAttribute('href');
+    if (href) {
+      const match = href.match(/^\/([^/?]+)/);
+      if (match) return match[1];
+    }
+  }
+  
+  // Method 3: Lấy từ bất kỳ link nào có dạng /username
+  const allLinks = article.querySelectorAll('a[href^="/"]');
+  for (const link of allLinks) {
+    const href = link.getAttribute('href');
+    if (href && href.length > 1 && href.length < 30 && !href.includes('/status/')) {
+      const match = href.match(/^\/([^/?]+)/);
+      if (match) return match[1];
+    }
+  }
+  
+  // Method 4: Fallback - lấy từ text content và loại bỏ @
+  const usernameSpan = article.querySelector('[data-testid="User-Name"] span:last-child');
+  if (usernameSpan) {
+    let text = usernameSpan.textContent?.trim() || '';
+    if (text.startsWith('@')) text = text.substring(1);
+    if (text && !text.includes(' ') && text.length > 0) return text;
+  }
+  
+  return '';
+}
+```
+
+## 🎯 **Testing với HTML mẫu của bạn**
+
+Với HTML bạn cung cấp:
+```html
+<a href="/_prettivee" role="link" ...>
+```
+→ Kết quả: `username = "_prettivee"` ✅
+
+Với HTML của `@Nitya_4u`:
+```html
+<a href="/Nitya_4u" ...>
+```
+→ Kết quả: `username = "Nitya_4u"` ✅
+
+## ✅ **Hoàn chỉnh - VerifiedUsersCollector Fixed**
+
+```typescript
+export class VerifiedUsersCollector {
+  
+  static async extractVerifiedUsersFromComments(
+    page: Page,
+    maxComments: number,
+    tweetId: string
+  ): Promise<VerifiedUserInfo[]> {
+    return await page.evaluate((max, tweetId) => {
+      const articles = Array.from(document.querySelectorAll('article[data-testid="tweet"]'));
+      const replies = articles.slice(1, max + 1);
+      
+      const verifiedUsers: any[] = [];
+
+      for (const article of replies) {
+        // Check verified badges
+        const hasBlueBadge = article.querySelector('[data-testid="icon-verified"]');
+        const hasGoldBadge = article.querySelector('[data-testid="icon-verified-gold"]');
+        const hasGreyBadge = article.querySelector('[data-testid="icon-verified-grey"]');
+        
+        if (!hasBlueBadge && !hasGoldBadge && !hasGreyBadge) continue;
+
+        // === LẤY USERNAME CHÍNH XÁC TỪ HREF ===
+        let username = '';
+        
+        // Tìm link đầu tiên có href dạng /username (không phải /status/)
+        const userLink = article.querySelector('a[href^="/"]:not([href*="/status/"])');
+        if (userLink) {
+          const href = userLink.getAttribute('href');
+          if (href && href.length > 1) {
+            // Xử lý href: "/username" hoặc "/username?tab=..."
+            username = href.split('/')[1]?.split('?')[0] || '';
+          }
+        }
+        
+        if (!username) continue; // Không tìm thấy username thì skip
+        
+        // Lấy display name (tên hiển thị)
+        let displayName = '';
+        const nameElement = article.querySelector('[data-testid="User-Name"] a span span');
+        if (nameElement) {
+          displayName = nameElement.textContent?.trim() || '';
+        }
+        
+        // Lấy avatar URL
+        const avatarImg = article.querySelector<HTMLImageElement>('[data-testid="Tweet-User-Avatar"] img');
+        const avatarUrl = avatarImg?.src || null;
+        
+        // Lấy comment text
+        const commentText = article.querySelector('[data-testid="tweetText"]')?.textContent?.trim() || '';
+        
+        // Lấy timestamp
+        const commentTimestamp = article.querySelector('time')?.getAttribute('datetime') || new Date().toISOString();
+        
+        // Xác định loại verified
+        let verifiedType: 'blue' | 'gold' | 'grey' | null = 'blue';
+        if (hasGoldBadge) verifiedType = 'gold';
+        if (hasGreyBadge) verifiedType = 'grey';
+
+        verifiedUsers.push({
+          profileId: username,
+          username: username,
+          displayName: displayName || username,
+          verifiedType,
+          commentText,
+          commentTimestamp,
+          commentUrl: `https://x.com${article.querySelector('a[href*="/status/"]')?.getAttribute('href') || ''}`,
+          avatarUrl,
+          tweetId
+        });
+      }
+
+      return verifiedUsers;
+    }, maxComments, tweetId);
+  }
+}
+```
+
+Lỗi đã được sửa! Bây giờ username sẽ được lấy **CHÍNH XÁC** từ `href` attribute. Cảm ơn bạn đã phát hiện vấn đề quan trọng này! 🎯

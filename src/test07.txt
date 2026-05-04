@@ -1,0 +1,609 @@
+Chào bạn! Tôi với vai trò ** Master Coding về Playwright cho nền tảng X(Twitter) ** sẽ phát triển hàm lưu thông tin người dùng có dấu tích xanh vào SQLite3 theo cấu trúc bạn yêu cầu.
+
+Dựa trên phân tích HTML bạn cung cấp, tôi thấy các verified badges nằm trong`<svg data-testid="icon-verified">`, `icon-verified-gold`, `icon-verified-grey`.
+
+## 📦 ** Giải pháp hoàn chỉnh **
+
+### ** 1. Database Schema & Manager **
+
+    ```typescript
+// database/VerifiedUsersDB.ts
+import sqlite3 from 'sqlite3';
+import { Database, open } from 'sqlite3';
+
+export interface VerifiedUserRecord {
+  profile_id: string;      // ID từ Twitter (nếu có) hoặc username làm key
+  username: string;        // Username không có @
+  is_fl: number;          // 0 hoặc 1 - đã follow hay chưa
+  update_time: string;    // ISO datetime
+  status: string;         // 'pending', 'followed', 'failed', 'skipped'
+  verified_type: string;  // 'blue', 'gold', 'grey'
+  display_name: string;   // Tên hiển thị
+  follower_count: number; // Số follower (nếu lấy được)
+  avatar_url: string;     // URL avatar
+  first_seen: string;     // Lần đầu thấy
+  last_comment_time: string; // Thời gian comment cuối
+  tweet_id: string;       // ID của tweet cha
+}
+
+export class VerifiedUsersDatabase {
+  private db: Database | null = null;
+  private dbPath: string;
+
+  constructor(dbPath: string = './verified_users.db') {
+    this.dbPath = dbPath;
+  }
+
+  async initialize(): Promise<void> {
+    this.db = await open({
+      filename: this.dbPath,
+      driver: sqlite3.Database
+    });
+
+    // Tạo bảng với cấu trúc mở rộng
+    await this.db.exec(`
+      CREATE TABLE IF NOT EXISTS verified_users(
+        profile_id TEXT PRIMARY KEY,
+        username TEXT NOT NULL UNIQUE,
+        display_name TEXT,
+        is_fl INTEGER DEFAULT 0,
+        update_time TEXT NOT NULL,
+        status TEXT DEFAULT 'pending',
+        verified_type TEXT,
+        follower_count INTEGER DEFAULT 0,
+        avatar_url TEXT,
+        first_seen TEXT NOT NULL,
+        last_comment_time TEXT,
+        tweet_id TEXT,
+        comment_count INTEGER DEFAULT 1,
+        last_error TEXT,
+        created_at TEXT DEFAULT CURRENT_TIMESTAMP,
+        updated_at TEXT DEFAULT CURRENT_TIMESTAMP
+    )
+    `);
+
+    // Tạo indexes để tối ưu query
+    await this.db.exec(`
+      CREATE INDEX IF NOT EXISTS idx_username ON verified_users(username);
+      CREATE INDEX IF NOT EXISTS idx_status ON verified_users(status);
+      CREATE INDEX IF NOT EXISTS idx_is_fl ON verified_users(is_fl);
+      CREATE INDEX IF NOT EXISTS idx_update_time ON verified_users(update_time);
+      CREATE INDEX IF NOT EXISTS idx_verified_type ON verified_users(verified_type);
+`);
+
+    console.log(`Database initialized at ${ this.dbPath } `);
+  }
+
+  async saveVerifiedUser(user: VerifiedUserRecord): Promise<boolean> {
+    if (!this.db) throw new Error('Database not initialized');
+
+    try {
+      const existing = await this.getUserByUsername(user.username);
+      
+      if (existing) {
+        // Update existing user
+        await this.db.run(`
+          UPDATE verified_users 
+          SET display_name = ?,
+    is_fl = ?,
+    update_time = ?,
+    status = ?,
+    verified_type = ?,
+    follower_count = ?,
+    avatar_url = ?,
+    last_comment_time = ?,
+    tweet_id = ?,
+    comment_count = comment_count + 1,
+    updated_at = CURRENT_TIMESTAMP
+          WHERE username = ?
+    `, [
+          user.display_name,
+          user.is_fl,
+          user.update_time,
+          user.status,
+          user.verified_type,
+          user.follower_count,
+          user.avatar_url,
+          user.last_comment_time,
+          user.tweet_id,
+          user.username
+        ]);
+      } else {
+        // Insert new user
+        await this.db.run(`
+          INSERT INTO verified_users(
+        profile_id, username, display_name, is_fl, update_time,
+        status, verified_type, follower_count, avatar_url,
+        first_seen, last_comment_time, tweet_id
+    ) VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        `, [
+          user.profile_id,
+          user.username,
+          user.display_name,
+          user.is_fl,
+          user.update_time,
+          user.status,
+          user.verified_type,
+          user.follower_count,
+          user.avatar_url,
+          user.first_seen,
+          user.last_comment_time,
+          user.tweet_id
+        ]);
+      }
+      
+      return true;
+    } catch (error) {
+      console.error(`Error saving user ${ user.username }: `, error);
+      return false;
+    }
+  }
+
+  async saveVerifiedUsersBatch(users: VerifiedUserRecord[]): Promise<number> {
+    let successCount = 0;
+    for (const user of users) {
+      if (await this.saveVerifiedUser(user)) {
+        successCount++;
+      }
+    }
+    return successCount;
+  }
+
+  async getUserByUsername(username: string): Promise<VerifiedUserRecord | null> {
+    if (!this.db) throw new Error('Database not initialized');
+    
+    return new Promise((resolve, reject) => {
+      this.db!.get(
+        'SELECT * FROM verified_users WHERE username = ?',
+        [username],
+        (err, row) => {
+          if (err) reject(err);
+          resolve(row as VerifiedUserRecord || null);
+        }
+      );
+    });
+  }
+
+  async updateFollowStatus(username: string, isFollowed: boolean, status: string): Promise<void> {
+    if (!this.db) throw new Error('Database not initialized');
+    
+    await this.db.run(`
+      UPDATE verified_users 
+      SET is_fl = ?, status = ?, update_time = ?, updated_at = CURRENT_TIMESTAMP
+      WHERE username = ?
+    `, [isFollowed ? 1 : 0, status, new Date().toISOString(), username]);
+  }
+
+  async getUnfollowedVerifiedUsers(limit: number = 100): Promise<VerifiedUserRecord[]> {
+    if (!this.db) throw new Error('Database not initialized');
+    
+    return new Promise((resolve, reject) => {
+      this.db!.all(
+        `SELECT * FROM verified_users 
+         WHERE is_fl = 0 AND status = 'pending' 
+         ORDER BY first_seen ASC LIMIT ? `,
+        [limit],
+        (err, rows) => {
+          if (err) reject(err);
+          resolve(rows as VerifiedUserRecord[]);
+        }
+      );
+    });
+  }
+
+  async getStatistics(): Promise<object> {
+    if (!this.db) throw new Error('Database not initialized');
+    
+    const stats = await new Promise((resolve, reject) => {
+      this.db!.get(`
+        SELECT
+COUNT(*) as total,
+    SUM(CASE WHEN is_fl = 1 THEN 1 ELSE 0 END) as followed,
+    SUM(CASE WHEN verified_type = 'blue' THEN 1 ELSE 0 END) as blue_count,
+    SUM(CASE WHEN verified_type = 'gold' THEN 1 ELSE 0 END) as gold_count,
+    SUM(CASE WHEN verified_type = 'grey' THEN 1 ELSE 0 END) as grey_count,
+    SUM(CASE WHEN status = 'pending' THEN 1 ELSE 0 END) as pending_count,
+    SUM(CASE WHEN status = 'followed' THEN 1 ELSE 0 END) as followed_count,
+    SUM(CASE WHEN status = 'failed' THEN 1 ELSE 0 END) as failed_count
+        FROM verified_users
+    `, (err, row) => {
+        if (err) reject(err);
+        resolve(row);
+      });
+    });
+    
+    return stats;
+  }
+
+  async close(): Promise<void> {
+    if (this.db) {
+      await this.db.close();
+    }
+  }
+}
+```
+
+### ** 2. Enhanced Tweet Parser với Database Integration **
+
+    ```typescript
+// twitter/VerifiedUsersCollector.ts
+import { Page } from '@playwright/test';
+
+interface VerifiedUserInfo {
+  profileId: string;
+  username: string;
+  displayName: string;
+  verifiedType: 'blue' | 'gold' | 'grey' | null;
+  commentText: string;
+  commentTimestamp: string;
+  commentUrl: string;
+  avatarUrl: string | null;
+  tweetId: string;
+}
+
+export class VerifiedUsersCollector {
+  
+  /**
+   * Thu thập thông tin verified users từ comments và lưu vào database
+   */
+  static async collectAndSaveVerifiedUsers(
+    page: Page,
+    db: VerifiedUsersDatabase,
+    options: {
+      maxComments?: number;
+      scrollToLoad?: boolean;
+      maxScrolls?: number;
+      autoFollow?: boolean;
+    } = {}
+  ): Promise<{
+    success: boolean;
+    totalFound: number;
+    savedToDB: number;
+    followed: number;
+    errors: string[];
+  }> {
+    const {
+      maxComments = 100,
+      scrollToLoad = true,
+      maxScrolls = 5,
+      autoFollow = false
+    } = options;
+
+    const errors: string[] = [];
+    let totalFound = 0;
+    let savedCount = 0;
+    let followedCount = 0;
+
+    try {
+      const tweetUrl = page.url();
+      const tweetId = this.extractTweetId(tweetUrl);
+      
+      if (!tweetId) {
+        throw new Error('Invalid tweet URL');
+      }
+
+      // Scroll để load comments
+      if (scrollToLoad) {
+        await this.smartScroll(page, maxScrolls);
+      }
+
+      // Extract verified users từ comments
+      const verifiedUsers = await this.extractVerifiedUsersFromComments(page, maxComments, tweetId);
+      totalFound = verifiedUsers.length;
+
+      // Lưu vào database
+      for (const user of verifiedUsers) {
+        const record: VerifiedUserRecord = {
+          profile_id: user.profileId || `user_${ user.username } `,
+          username: user.username,
+          display_name: user.displayName,
+          is_fl: 0,
+          update_time: new Date().toISOString(),
+          status: autoFollow ? 'pending' : 'skipped',
+          verified_type: user.verifiedType || 'blue',
+          follower_count: 0,
+          avatar_url: user.avatarUrl || '',
+          first_seen: new Date().toISOString(),
+          last_comment_time: user.commentTimestamp,
+          tweet_id: tweetId
+        };
+
+        const saved = await db.saveVerifiedUser(record);
+        if (saved) {
+          savedCount++;
+          
+          // Auto-follow nếu được yêu cầu
+          if (autoFollow) {
+            const followed = await this.followUserIfNeeded(page, user.username);
+            if (followed) {
+              followedCount++;
+              await db.updateFollowStatus(user.username, true, 'followed');
+            } else {
+              await db.updateFollowStatus(user.username, false, 'failed');
+            }
+            
+            // Delay để tránh rate limit
+            await this.randomDelay(1500, 3000);
+          }
+        } else {
+          errors.push(`Failed to save user: ${ user.username } `);
+        }
+      }
+
+      return {
+        success: true,
+        totalFound,
+        savedToDB: savedCount,
+        followed: followedCount,
+        errors
+      };
+    } catch (error) {
+      return {
+        success: false,
+        totalFound,
+        savedToDB: savedCount,
+        followed: followedCount,
+        errors: [...errors, error instanceof Error ? error.message : String(error)]
+      };
+    }
+  }
+
+  /**
+   * Extract verified users từ comments
+   */
+  private static async extractVerifiedUsersFromComments(
+    page: Page,
+    maxComments: number,
+    tweetId: string
+  ): Promise<VerifiedUserInfo[]> {
+    return await page.evaluate((max, tweetId) => {
+      const articles = Array.from(document.querySelectorAll('article[data-testid="tweet"]'));
+      // Bỏ qua tweet đầu tiên (tweet gốc)
+      const replies = articles.slice(1, max + 1);
+      
+      const verifiedUsers: any[] = [];
+
+      for (const article of replies) {
+        // Kiểm tra verified status
+        const hasBlueBadge = article.querySelector('[data-testid="icon-verified"]');
+        const hasGoldBadge = article.querySelector('[data-testid="icon-verified-gold"]');
+        const hasGreyBadge = article.querySelector('[data-testid="icon-verified-grey"]');
+        
+        if (!hasBlueBadge && !hasGoldBadge && !hasGreyBadge) {
+          continue; // Skip non-verified users
+        }
+
+        // Extract username
+        const usernameElement = article.querySelector('[data-testid="User-Name"] a[href*="/"]:last-child span');
+        let username = usernameElement?.textContent?.trim().replace('@', '') || '';
+        
+        // Nếu không lấy được username từ selector chính, thử với selector khác
+        if (!username) {
+          const altUsername = article.querySelector('[data-testid="User-Name"] div[dir="ltr"] span:last-child');
+          username = altUsername?.textContent?.trim().replace('@', '') || '';
+        }
+
+        // Extract display name
+        const displayName = article.querySelector('[data-testid="User-Name"] a span span')?.textContent?.trim() || username;
+        
+        // Extract comment text
+        const commentText = article.querySelector('[data-testid="tweetText"]')?.textContent?.trim() || '';
+        
+        // Extract timestamp
+        const commentTimestamp = article.querySelector('time')?.getAttribute('datetime') || new Date().toISOString();
+        
+        // Extract comment URL
+        const commentPath = article.querySelector('a[href*="/status/"]')?.getAttribute('href') || '';
+        const commentUrl = commentPath ? `https://x.com${commentPath}` : '';
+
+// Extract avatar URL
+const avatarImg = article.querySelector<HTMLImageElement>('[data-testid="Tweet-User-Avatar"] img');
+const avatarUrl = avatarImg?.src || null;
+
+// Extract profile ID từ avatar container
+const avatarContainer = article.querySelector('[data-testid="UserAvatar-Container"]');
+const profileId = avatarContainer?.getAttribute('data-testid')?.replace('UserAvatar-Container-', '') || username;
+
+// Determine verified type
+let verifiedType: 'blue' | 'gold' | 'grey' | null = null;
+if (hasBlueBadge) verifiedType = 'blue';
+if (hasGoldBadge) verifiedType = 'gold';
+if (hasGreyBadge) verifiedType = 'grey';
+
+if (username) {
+    verifiedUsers.push({
+        profileId,
+        username,
+        displayName,
+        verifiedType,
+        commentText,
+        commentTimestamp,
+        commentUrl,
+        avatarUrl,
+        tweetId
+    });
+}
+      }
+
+return verifiedUsers;
+    }, maxComments, tweetId);
+  }
+
+  /**
+   * Smart scroll để load comments
+   */
+  private static async smartScroll(page: Page, maxScrolls: number): Promise < void> {
+    let previousCount = 0;
+    let noNewCount = 0;
+
+    for(let i = 0; i <maxScrolls; i++) {
+    const currentCount = await page.$$eval('article[data-testid="tweet"]', els => els.length);
+
+    if (currentCount === previousCount) {
+        noNewCount++;
+        if (noNewCount >= 2) break;
+    } else {
+        noNewCount = 0;
+    }
+
+    previousCount = currentCount;
+
+    // Scroll với khoảng cách ngẫu nhiên
+    const scrollDistance = Math.floor(Math.random() * 400) + 500;
+    await page.evaluate((distance) => {
+        window.scrollBy(0, distance);
+    }, scrollDistance);
+
+    await this.randomDelay(1200, 2000);
+}
+  }
+
+  /**
+   * Follow user nếu cần
+   */
+  private static async followUserIfNeeded(page: Page, username: string): Promise < boolean > {
+    try {
+        // Tìm và click nút Follow
+        const followButton = await page.locator(`button[data-testid*="follow"][role="button"]`).first();
+
+        if(await followButton.isVisible()) {
+    const buttonText = await followButton.textContent();
+    if (buttonText?.toLowerCase().includes('follow')) {
+        await followButton.click();
+        await this.randomDelay(500, 1000);
+        return true;
+    }
+}
+return false;
+    } catch (error) {
+    console.error(`Error following ${username}:`, error);
+    return false;
+}
+  }
+
+  /**
+   * Random delay để tránh bị phát hiện
+   */
+  private static async randomDelay(min: number, max: number): Promise < void> {
+    const delay = Math.floor(Math.random() * (max - min + 1) + min);
+    await new Promise(resolve => setTimeout(resolve, delay));
+}
+
+  /**
+   * Extract tweet ID từ URL
+   */
+  private static extractTweetId(url: string): string | null {
+    const match = url.match(/\/status\/(\d+)/);
+    return match ? match[1] : null;
+}
+}
+```
+
+### **3. Complete Integration Example**
+
+```typescript
+// example/collectVerifiedUsers.ts
+import { chromium } from 'playwright';
+
+async function main() {
+    // Khởi tạo database
+    const db = new VerifiedUsersDatabase('./x_verified_users.db');
+    await db.initialize();
+
+    // Launch browser
+    const browser = await chromium.launch({ headless: false });
+    const context = await browser.newContext();
+    const page = await context.newPage();
+
+    try {
+        // Login to X (Twitter) - bạn cần implement login logic
+        await page.goto('https://x.com/login');
+        // ... login code here ...
+
+        // Go to a tweet
+        await page.goto('https://x.com/username/status/123456789');
+        await page.waitForSelector('article[data-testid="tweet"]');
+
+        // Collect and save verified users
+        const result = await VerifiedUsersCollector.collectAndSaveVerifiedUsers(page, db, {
+            maxComments: 100,
+            scrollToLoad: true,
+            maxScrolls: 5,
+            autoFollow: false  // Set to true để auto-follow
+        });
+
+        console.log('Collection Result:', {
+            success: result.success,
+            totalFound: result.totalFound,
+            savedToDB: result.savedToDB,
+            followed: result.followed,
+            errors: result.errors
+        });
+
+        // Get statistics
+        const stats = await db.getStatistics();
+        console.log('Database Statistics:', stats);
+
+        // Get list of users to follow
+        const toFollow = await db.getUnfollowedVerifiedUsers(10);
+        console.log(`Found ${toFollow.length} users to follow`);
+
+    } catch (error) {
+        console.error('Error:', error);
+    } finally {
+        await db.close();
+        await browser.close();
+    }
+}
+
+main();
+```
+
+### **4. Query Helper Functions**
+
+```typescript
+// utils/queryHelpers.ts
+export class VerifiedUsersQuery {
+
+    static async getUsersByDateRange(
+        db: VerifiedUsersDatabase,
+        startDate: Date,
+        endDate: Date
+    ): Promise<VerifiedUserRecord[]> {
+        // Implement query
+    }
+
+    static async exportToCSV(db: VerifiedUsersDatabase, outputPath: string): Promise<void> {
+        // Export dữ liệu ra CSV cho phân tích
+    }
+
+    static async getVerifiedTypesBreakdown(db: VerifiedUsersDatabase): Promise<object> {
+        // Thống kê theo loại verified
+    }
+}
+```
+
+## 📊 **Cấu trúc Database đầy đủ**
+
+```sql
+--Bảng chính
+verified_users(
+    profile_id TEXT PRIMARY KEY, --ID từ X
+  username TEXT NOT NULL UNIQUE, --username(key chính để query)
+  display_name TEXT, --Tên hiển thị
+  is_fl INTEGER DEFAULT 0, --0: chưa follow, 1: đã follow
+  update_time TEXT NOT NULL, --Thời gian cập nhật cuối
+  status TEXT DEFAULT 'pending', --pending, followed, failed, skipped
+  verified_type TEXT, --blue, gold, grey
+  follower_count INTEGER DEFAULT 0, --Số follower
+  avatar_url TEXT, --URL avatar
+  first_seen TEXT NOT NULL, --Lần đầu xuất hiện
+  last_comment_time TEXT, --Thời gian comment cuối
+  tweet_id TEXT, --ID tweet
+  comment_count INTEGER DEFAULT 1, --Số comment đã thấy
+  last_error TEXT, --Lỗi cuối cùng
+  created_at TEXT, --Thời gian tạo record
+  updated_at TEXT-- Thời gian update cuối
+);
+```
+

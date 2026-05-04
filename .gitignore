@@ -1,0 +1,17 @@
+node_modules/
+.env
+.env.*
+!.env.example
+playwright-report/
+test-results/
+artifacts/.tmp/
+browser_profiles/
+backups/
+logs/
+coverage/
+.DS_Store
+storage/*.json
+!storage/.gitkeep
+*.log
+*.db
+*.db-journal
