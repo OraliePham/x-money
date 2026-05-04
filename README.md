@@ -130,3 +130,5 @@ running stealth checks, and using the TypeScript APIs.
 - Keep tests independent; do not rely on execution order.
 - Keep selectors close to page objects.
 - Prefer stable test IDs only when user-facing locators are not reliable.
+- npx tsx src/profile-launcher.ts profile_01_id https://x.com/home --read-comments --follow-verified-users --max-comments 100 --extract-detailed-info --max-users-to-process 10 --like-current-tweet
+
