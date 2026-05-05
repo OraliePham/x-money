@@ -131,4 +131,8 @@ running stealth checks, and using the TypeScript APIs.
 - Keep selectors close to page objects.
 - Prefer stable test IDs only when user-facing locators are not reliable.
 - npx tsx src/profile-launcher.ts profile_01_id https://x.com/home --read-comments --follow-verified-users --max-comments 100 --extract-detailed-info --max-users-to-process 10 --like-current-tweet
+npx tsx src/profile-launcher.ts profile_01_id https://x.com/home --read-comments --feed-tab following --follow yes --follow-verified-users --max-comments 3 --extract-detailed-info --max-users-to-process 1 --like-current-tweet
 
+npx tsx src/profile-launcher.ts profile_01_id https://x.com/home --feed-tab following --read-comments --follow yes --follow-verified
+-users --max-comments 1 --extract-detailed-info --max-users-to-process 1 --reply-text auto --auto-reply-template ./reply-templates.txt
+ --deepseek-model deepseek-chat --reply-stay --reply-max-length 280 --reply-timeout-ms 15000 --min-tweet-length 5 --like-current-tweet
