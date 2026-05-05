@@ -1,6 +1,7 @@
 // FILE: src/profile-launcher.ts
 // COMPLETE INTEGRATION WITH X ACTIONS - FIXED VERSION
 
+import 'dotenv/config';
 import { HumanBehavior } from './human-behavior.js';
 import { ProfileManagerWithSQLite } from './profile-manager-with-sqlite.js';
 import XActions from './x-actions.js';
@@ -43,6 +44,17 @@ type LauncherArgs = {
   extractTweetInfo: boolean;
   clickRandomOnText: boolean;
   screenshotBeforeClick: boolean;
+  replyText?: string;
+  replyLike: boolean;
+  replyStay: boolean;
+  replyMaxLength: number;
+  replyTimeoutMs: number;
+  autoReplyMode: 'template' | 'ai' | 'hybrid';
+  autoReplyTemplate: string;
+  deepseekKey: string;
+  deepseekModel: string;
+  likeBeforeReply: boolean;
+  minTweetLength: number;
 };
 
 // =============================================================================
@@ -71,6 +83,17 @@ function parseArgs(argv: string[]): LauncherArgs {
     extractTweetInfo: argv.includes('--extract-tweet-info'),
     clickRandomOnText: argv.includes('--click-random-text'),
     screenshotBeforeClick: argv.includes('--screenshot'),
+    replyText: parseReplyText(argv),
+    replyLike: argv.includes('--reply-like'),
+    replyStay: argv.includes('--reply-stay'),
+    replyMaxLength: parseReplyMaxLength(argv),
+    replyTimeoutMs: parseReplyTimeoutMs(argv),
+    autoReplyMode: parseAutoReplyMode(argv),
+    autoReplyTemplate: parseStringArg(argv, '--auto-reply-template', './reply-templates.txt'),
+    deepseekKey: parseStringArg(argv, '--deepseek-key', process.env.DEEPSEEK_API_KEY ?? ''),
+    deepseekModel: parseStringArg(argv, '--deepseek-model', 'deepseek-chat'),
+    likeBeforeReply: argv.includes('--like-before-reply'),
+    minTweetLength: parseMinTweetLength(argv),
   };
 }
 
@@ -80,6 +103,14 @@ function collectPositionalArgs(argv: string[]): string[] {
     '--max-users-to-process',
     '--feed-tab',
     '--follow',
+    '--reply-text',
+    '--reply-max-length',
+    '--reply-timeout-ms',
+    '--auto-reply-mode',
+    '--auto-reply-template',
+    '--deepseek-key',
+    '--deepseek-model',
+    '--min-tweet-length',
   ]);
   const positional: string[] = [];
 
@@ -136,6 +167,52 @@ function parseMaxUsersToProcess(argv: string[]): number {
 
   const parsed = Number.parseInt(raw, 10);
   return Number.isFinite(parsed) && parsed > 0 ? parsed : 20;
+}
+
+function parseReplyText(argv: string[]): string | undefined {
+  const flagIndex = argv.findIndex((arg) => arg === '--reply-text');
+  if (flagIndex === -1) return undefined;
+  const raw = argv[flagIndex + 1]?.trim();
+  return raw && raw.length > 0 ? raw : undefined;
+}
+
+function parseReplyMaxLength(argv: string[]): number {
+  const flagIndex = argv.findIndex((arg) => arg === '--reply-max-length');
+  if (flagIndex === -1) return 280;
+  const raw = argv[flagIndex + 1];
+  const parsed = raw ? Number.parseInt(raw, 10) : Number.NaN;
+  return Number.isFinite(parsed) && parsed > 0 ? parsed : 280;
+}
+
+function parseReplyTimeoutMs(argv: string[]): number {
+  const flagIndex = argv.findIndex((arg) => arg === '--reply-timeout-ms');
+  if (flagIndex === -1) return 15000;
+  const raw = argv[flagIndex + 1];
+  const parsed = raw ? Number.parseInt(raw, 10) : Number.NaN;
+  return Number.isFinite(parsed) && parsed > 0 ? parsed : 15000;
+}
+
+function parseAutoReplyMode(argv: string[]): 'template' | 'ai' | 'hybrid' {
+  const idx = argv.findIndex((arg) => arg === '--auto-reply-mode');
+  if (idx === -1) return 'template';
+  const raw = argv[idx + 1]?.trim().toLowerCase();
+  if (raw === 'ai' || raw === 'hybrid') return raw;
+  return 'template';
+}
+
+function parseStringArg(argv: string[], flag: string, defaultValue: string): string {
+  const idx = argv.findIndex((arg) => arg === flag);
+  if (idx === -1) return defaultValue;
+  const raw = argv[idx + 1];
+  return raw && raw.trim().length > 0 ? raw : defaultValue;
+}
+
+function parseMinTweetLength(argv: string[]): number {
+  const idx = argv.findIndex((arg) => arg === '--min-tweet-length');
+  if (idx === -1) return 5;
+  const raw = argv[idx + 1];
+  const parsed = raw ? Number.parseInt(raw, 10) : Number.NaN;
+  return Number.isFinite(parsed) && parsed > 0 ? parsed : 5;
 }
 
 function normalizeUrl(rawUrl: string): string {
@@ -431,10 +508,10 @@ async function runClickReadLikePipeline(
   profileId: string,
   args: LauncherArgs,
 ): Promise<void> {
-  if (!args.likeCurrentTweet && !args.readComments) return;
+  if (!args.likeCurrentTweet && !args.readComments && !args.replyText) return;
 
   console.log(
-    '\nRunning pipeline: clickNewFeedOrFollowing -> clickFirstTweet -> readTweetFollow -> likeCurrentTweet',
+    '\nRunning pipeline: clickNewFeedOrFollowing -> clickFirstTweet -> readTweetFollow -> replyToTweet -> likeCurrentTweet',
   );
 
   const switchedTab = await XActions.clickNewFeedOrFollowingRobust(page, args.feedTab, {
@@ -446,6 +523,16 @@ async function runClickReadLikePipeline(
   }
   await HumanBehavior.delay(600, 1200);
 
+  let openedTweetUrl = page.url();
+  let openedTweetText = '';
+  let firstTweetTextFromFeed = '';
+  try {
+    const firstTweetInfo = await XActions.extractFullTweetInfo(page, 0);
+    firstTweetTextFromFeed = firstTweetInfo?.text?.trim() ?? '';
+  } catch {
+    firstTweetTextFromFeed = '';
+  }
+
   if (!page.url().includes('/status/')) {
     const clicked = await XActions.clickFirstTweet(page, true);
     if (!clicked) {
@@ -453,15 +540,74 @@ async function runClickReadLikePipeline(
       return;
     }
   }
+  openedTweetUrl = page.url();
+  openedTweetText = (await XActions.getCurrentTweetText(page)) ?? '';
+  if (!openedTweetText && firstTweetTextFromFeed) {
+    openedTweetText = firstTweetTextFromFeed;
+    console.log(`Using fallback tweet text captured from feed (${openedTweetText.length} chars).`);
+  }
+  if (openedTweetText) {
+    console.log(`Captured first tweet text (${openedTweetText.length} chars) for downstream processing.`);
+  } else {
+    console.log('Could not capture first tweet text right after opening tweet.');
+  }
+
+  if (args.follow === 'yes') {
+    const currentTweetUrl = page.url();
+    try {
+      const tweetDetail = await XActions.getCurrentTweetDetail(page);
+      const authorFromUrl = tweetDetail?.tweetUrl.match(/^https?:\/\/(?:x|twitter)\.com\/([^/]+)\/status\//i)?.[1];
+      const fallbackAuthor = tweetDetail?.authorUsername?.trim();
+      const authorUsername = (authorFromUrl ?? fallbackAuthor ?? '').trim().replace(/^@/, '');
+      const isValidAuthorUsername = /^[A-Za-z0-9_]{1,15}$/.test(authorUsername);
+
+      if (!authorUsername || !isValidAuthorUsername) {
+        console.log('Follow step skipped: could not detect tweet author username.');
+      } else {
+        console.log(`Following first tweet author: @${authorUsername}`);
+        const followedAuthor = await XActions.followUser(page, authorUsername);
+        console.log(
+          followedAuthor
+            ? `Followed author @${authorUsername} (or already following).`
+            : `Could not follow author @${authorUsername}.`,
+        );
+
+        if (currentTweetUrl.includes('/status/')) {
+          await page.goto(currentTweetUrl, { waitUntil: 'domcontentloaded' });
+          await page.waitForURL(/\/status\/\d+/, { timeout: 10000 }).catch(() => undefined);
+          await HumanBehavior.delay(600, 1200);
+        }
+      }
+    } catch (error) {
+      console.error('Follow step failed after opening first tweet:', error);
+      if (currentTweetUrl.includes('/status/')) {
+        await page.goto(currentTweetUrl, { waitUntil: 'domcontentloaded' }).catch(() => undefined);
+      }
+    }
+  }
 
   const shouldReadComments = args.readComments || args.likeCurrentTweet;
   if (shouldReadComments) {
+    const alreadyFollowedUsernames = manager.getStorage().getFollowedVerifiedUsernames(profileId);
+    const recentFollowCount = manager.getStorage().countRecentFollowedUsers(profileId, 5);
+    const remainingFollowSlots = Math.max(0, 10 - recentFollowCount);
+    if (alreadyFollowedUsernames.length > 0) {
+      console.log(
+        `Skipping ${alreadyFollowedUsernames.length} user(s) already followed from verified_users (is_fl=1).`,
+      );
+    }
+    console.log(`Follow throttle window(5m): used=${recentFollowCount}/10, remaining=${remainingFollowSlots}`);
+
     const readResult = await XActions.readTweetFollow(page, {
       maxComments: args.maxComments,
       follow: args.follow,
       followVerified: args.followVerifiedUsers,
       extractDetailedInfo: args.extractDetailedInfo,
       maxUsersToProcess: args.maxUsersToProcess,
+      excludeUsernames: alreadyFollowedUsernames,
+      followProbabilityMin: 0.1,
+      followProbabilityMax: 0.2,
+      maxFollowsThisRun: remainingFollowSlots,
     });
 
     if (readResult.success) {
@@ -483,12 +629,59 @@ async function runClickReadLikePipeline(
 
   if (!args.likeCurrentTweet) return;
 
-  const liked = await XActions.likeCurrentTweet(page, {
-    timeoutMs: 20000,
-    navigateToHomeOnSuccess: true,
-    waitAfterLikeMs: 2000,
-  });
-  console.log(liked ? 'Like successful and returned to home' : 'Like failed or already liked');
+  let likeHandledBeforeReply = false;
+  if (args.replyText && !args.replyStay && args.likeCurrentTweet) {
+    const likedBeforeReply = await XActions.likeCurrentTweet(page, {
+      timeoutMs: 20000,
+      navigateToHomeOnSuccess: false,
+      waitAfterLikeMs: 2000,
+    });
+    likeHandledBeforeReply = true;
+    console.log(
+      likedBeforeReply
+        ? 'Like successful before reply flow'
+        : 'Like failed or already liked before reply flow',
+    );
+  }
+
+  if (args.replyText) {
+    const useAutoReply = args.replyText.trim().toLowerCase() === 'auto';
+    if (openedTweetUrl.includes('/status/') && page.url() !== openedTweetUrl) {
+      await page.goto(openedTweetUrl, { waitUntil: 'domcontentloaded' }).catch(() => undefined);
+      await page.waitForURL(/\/status\/\d+/, { timeout: 10000 }).catch(() => undefined);
+      await HumanBehavior.delay(500, 1000);
+    }
+    const replied = useAutoReply
+      ? await XActions.autoReplyToTweet(page, {
+          mode: args.autoReplyMode,
+          templatePath: args.autoReplyTemplate,
+          deepseekApiKey: args.deepseekKey,
+          deepseekModel: args.deepseekModel,
+          likeBeforeReply: args.likeBeforeReply,
+          stayOnPage: args.replyStay,
+          maxReplyLength: args.replyMaxLength,
+          minTweetLength: args.minTweetLength,
+          timeoutMs: args.replyTimeoutMs,
+          sourceTweetText: openedTweetText,
+        })
+      : await XActions.replyToTweet(page, {
+          replyText: args.replyText,
+          likeAfterReply: args.replyLike && !args.likeCurrentTweet,
+          stayOnPage: args.replyStay,
+          maxReplyLength: args.replyMaxLength,
+          timeoutMs: args.replyTimeoutMs,
+        });
+    console.log(replied ? 'Reply flow completed' : 'Reply flow failed');
+  }
+
+  if (!likeHandledBeforeReply && args.likeCurrentTweet) {
+    const liked = await XActions.likeCurrentTweet(page, {
+      timeoutMs: 20000,
+      navigateToHomeOnSuccess: true,
+      waitAfterLikeMs: 2000,
+    });
+    console.log(liked ? 'Like successful and returned to home' : 'Like failed or already liked');
+  }
 }
 
 void runTweetReadFollowLikeFlow;
@@ -583,6 +776,17 @@ async function main(): Promise<void> {
   console.log(`   --extract-tweet-info: ${args.extractTweetInfo}`);
   console.log(`   --click-random-text: ${args.clickRandomOnText}`);
   console.log(`   --screenshot: ${args.screenshotBeforeClick}`);
+  console.log(`   --reply-text: ${args.replyText ?? '(none)'}`);
+  console.log(`   --reply-like: ${args.replyLike}`);
+  console.log(`   --reply-stay: ${args.replyStay}`);
+  console.log(`   --reply-max-length: ${args.replyMaxLength}`);
+  console.log(`   --reply-timeout-ms: ${args.replyTimeoutMs}`);
+  console.log(`   --auto-reply-mode: ${args.autoReplyMode}`);
+  console.log(`   --auto-reply-template: ${args.autoReplyTemplate}`);
+  console.log(`   --deepseek-key: ${args.deepseekKey ? '***set***' : '(empty)'}`);
+  console.log(`   --deepseek-model: ${args.deepseekModel}`);
+  console.log(`   --like-before-reply: ${args.likeBeforeReply}`);
+  console.log(`   --min-tweet-length: ${args.minTweetLength}`);
   console.log(`   --dry-run: ${args.dryRun}`);
 
   if (args.dryRun) {

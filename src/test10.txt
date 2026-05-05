@@ -1,0 +1,93 @@
+// ============================================================================
+// 9. REPLY TO TWEET - BÌNH LUẬN VÀO BÀI VIẾT
+// ============================================================================
+/**
+ * Cấu hình cho hành động reply.
+ */
+export type ReplyToTweetOptions = {
+    replyText: string;          // Nội dung bình luận
+    likeAfterReply?: boolean;   // Tự động like bài viết sau khi reply
+    stayOnPage?: boolean;       // Ở lại trang tweet hay quay lại feed? (Mặc định: false - quay lại feed)
+    maxReplyLength?: number;    // Giới hạn độ dài bình luận (Mặc định: 280)
+    timeoutMs?: number;         // Timeout cho các thao tác (Mặc định: 15000)
+};
+
+/**
+ * Thực hiện bình luận vào tweet hiện tại.
+ * @param {Page} page - Page object của Playwright
+ * @param {ReplyToTweetOptions} options - Cấu hình cho hành động reply.
+ * @returns {Promise<boolean>} - Trả về true nếu bình luận thành công, ngược lại false.
+ */
+static async replyToTweet(page: Page, options: ReplyToTweetOptions): Promise<boolean> {
+    const {
+        replyText,
+        likeAfterReply = false,
+        stayOnPage = false,
+        maxReplyLength = 280,
+        timeoutMs = 15000,
+    } = options;
+
+    // --- Kiểm tra tính hợp lệ và giới hạn ký tự ---
+    if (!replyText || replyText.trim().length === 0) {
+        console.error('[replyToTweet] ❌ Reply text cannot be empty.');
+        return false;
+    }
+    if (replyText.length > maxReplyLength) {
+        console.warn(`[replyToTweet] ⚠️ Reply text exceeds ${maxReplyLength} characters. It may get truncated.`);
+    }
+
+    try {
+        // --- Bước 1: Nhấp vào nút "Reply" để mở hộp soạn thảo ---
+        const replyButton = page.locator('[data-testid="reply"]').first();
+        await replyButton.waitFor({ state: 'visible', timeout: timeoutMs });
+        
+        // Thao tác giống người thật: hover và click chậm
+        await replyButton.hover();
+        await HumanBehavior.delay(300, 600);
+        await replyButton.click();
+        console.log('[replyToTweet] 📝 Opened reply box.');
+        await HumanBehavior.delay(800, 1200);
+
+        // --- Bước 2: Nhập nội dung bình luận vào khung soạn thảo ---
+        // Sử dụng bộ chọn chính xác dựa trên HTML bạn cung cấp
+        const textarea = page.locator('[data-testid="tweetTextarea_0"]').first();
+        await textarea.waitFor({ state: 'visible', timeout: timeoutMs });
+        
+        // Đặt con trỏ và nhập văn bản như người dùng (gõ từng chữ)
+        await textarea.click();
+        await HumanBehavior.delay(200, 400);
+        await textarea.fill(replyText); // Hoặc có thể dùng .pressSequentially để chậm hơn
+
+        // --- Bước 3: Nhấn nút "Reply" để đăng bình luận ---
+        // Nút đăng có thể có hai data-testid: 'tweetButton' hoặc 'tweetButtonInline'
+        const postButton = page.locator('[data-testid="tweetButton"], [data-testid="tweetButtonInline"]').first();
+        await postButton.waitFor({ state: 'visible', timeout: timeoutMs });
+        
+        // Có thể có một khoảng chờ ngắn để người dùng "đọc lại" bình luận trước khi đăng
+        await HumanBehavior.delay(500, 1000);
+        await postButton.click();
+        console.log('[replyToTweet] ✅ Reply posted.');
+
+        // --- Bước 4: Xử lý các hành động sau khi đăng ---
+        // Một chút thời gian để Xử lý bình luận
+        await HumanBehavior.delay(2000, 3000);
+
+        if (likeAfterReply) {
+            console.log('[replyToTweet] ❤️ Attempting to like the original tweet as well...');
+            await this.likeCurrentTweet(page, { navigateToHomeOnSuccess: false });
+        }
+
+        if (!stayOnPage) {
+            console.log('[replyToTweet] 🏠 Navigating back to home feed.');
+            await this.goToHome(page);
+        } else {
+            console.log('[replyToTweet] 🧭 Staying on the tweet page.');
+        }
+
+        return true;
+
+    } catch (error) {
+        console.error(`[replyToTweet] ❌ Failed to reply: ${error}`);
+        return false;
+    }
+}

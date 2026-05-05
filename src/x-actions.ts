@@ -3,6 +3,7 @@
 
 import { Page } from 'playwright';
 import { HumanBehavior } from './human-behavior.js';
+import { readFile } from 'node:fs/promises';
 
 // =============================================================================
 // TYPES & INTERFACES
@@ -108,6 +109,10 @@ export type ReadTweetFollowOptions = {
   followVerified?: boolean;      // Deprecated: compatibility with old callers
   extractDetailedInfo?: boolean; // Open profile pages and enrich follower/profile details
   maxUsersToProcess?: number;    // Limit users processed for detailed extraction
+  excludeUsernames?: string[];   // Skip users already followed/synced in DB
+  followProbabilityMin?: number; // Minimum follow probability per candidate (0..1)
+  followProbabilityMax?: number; // Maximum follow probability per candidate (0..1)
+  maxFollowsThisRun?: number;    // Hard cap of follows allowed in this run
 };
 
 export type ReadTweetFollowResult = {
@@ -117,6 +122,28 @@ export type ReadTweetFollowResult = {
   followedUsers: string[];       // Usernames that were followed
   skippedUsers: string[];        // Usernames that were skipped
   error?: string;
+};
+
+export type ReplyToTweetOptions = {
+  replyText: string;
+  likeAfterReply?: boolean;
+  stayOnPage?: boolean;
+  maxReplyLength?: number;
+  timeoutMs?: number;
+};
+
+export type AutoReplyMode = 'template' | 'ai' | 'hybrid';
+export type AutoReplyOptions = {
+  mode?: AutoReplyMode;
+  templatePath?: string;
+  deepseekApiKey?: string;
+  deepseekModel?: string;
+  likeBeforeReply?: boolean;
+  stayOnPage?: boolean;
+  maxReplyLength?: number;
+  minTweetLength?: number;
+  timeoutMs?: number;
+  sourceTweetText?: string;
 };
 
 type FollowState = 'following' | 'not-following' | 'blocked' | 'unknown';
@@ -163,11 +190,6 @@ function isHomeFeedUrl(url: string): boolean {
 
 function normalizeUsername(username: string): string {
   return username.replace(/^@/, '');
-}
-
-function parseStat(label: string, name: string): string {
-  const match = label.match(new RegExp(`(\\d+(?:,\\d+)*(?:\\.\\d+)?[KkM]?)\\s*${name}`));
-  return match?.[1] ?? '0';
 }
 
 // =============================================================================
@@ -471,11 +493,6 @@ export class XActions {
         const statsGroup = article.querySelector('div[role="group"][aria-label]');
         const ariaLabel = statsGroup?.getAttribute('aria-label') || '';
         
-        const parseStatLocal = (label: string, name: string): string => {
-          const match = label.match(new RegExp(`(\\d+(?:,\\d+)*(?:\\.\\d+)?[KkM]?)\\s*${name}`));
-          return match?.[1] ?? '0';
-        };
-        
         const images = Array.from(article.querySelectorAll('[data-testid="tweetPhoto"] img'))
           .map(img => img.getAttribute('src'))
           .filter(Boolean) as string[];
@@ -491,10 +508,10 @@ export class XActions {
           authorUsername,
           tweetUrl,
           timestamp,
-          likes: parseStatLocal(ariaLabel, 'likes?'),
-          retweets: parseStatLocal(ariaLabel, 'reposts?'),
-          replies: parseStatLocal(ariaLabel, 'replies?'),
-          views: parseStatLocal(ariaLabel, 'views?'),
+          likes: ariaLabel.match(/(\d+(?:,\d+)*(?:\.\d+)?[KkM]?)\s*likes?/i)?.[1] ?? '0',
+          retweets: ariaLabel.match(/(\d+(?:,\d+)*(?:\.\d+)?[KkM]?)\s*reposts?/i)?.[1] ?? '0',
+          replies: ariaLabel.match(/(\d+(?:,\d+)*(?:\.\d+)?[KkM]?)\s*replies?/i)?.[1] ?? '0',
+          views: ariaLabel.match(/(\d+(?:,\d+)*(?:\.\d+)?[KkM]?)\s*views?/i)?.[1] ?? '0',
           isVerified: Boolean(article.querySelector('[data-testid="icon-verified"]')),
           mediaUrls: images,
           ...(videoPoster ? { videoPoster } : {}),
@@ -757,10 +774,12 @@ export class XActions {
       const viewport = page.viewportSize();
       const box = (await tweetLink.boundingBox()) ?? (await tweet.boundingBox());
       if (box && viewport) {
-        const minX = Math.max(2, box.x);
-        const maxX = Math.min(viewport.width - 2, box.x + box.width);
-        const minY = Math.max(2, box.y);
-        const maxY = Math.min(viewport.height - 2, box.y + box.height);
+        const safePadding = 12;
+        const innerPadding = 4;
+        const minX = Math.max(safePadding, box.x + innerPadding);
+        const maxX = Math.min(viewport.width - safePadding, box.x + box.width - innerPadding);
+        const minY = Math.max(safePadding, box.y + innerPadding);
+        const maxY = Math.min(viewport.height - safePadding, box.y + box.height - innerPadding);
         const hasVisibleArea = maxX > minX && maxY > minY;
 
         if (hasVisibleArea) {
@@ -771,8 +790,28 @@ export class XActions {
           const clickX = Math.max(minX, Math.min(maxX, randomX + offsetX));
           const clickY = Math.max(minY, Math.min(maxY, randomY + offsetY));
           console.log(`Clicking tweet link at: (${clickX.toFixed(0)}, ${clickY.toFixed(0)})`);
+          await HumanBehavior.mouseMove(page, clickX - 10, clickY - 8);
+          await HumanBehavior.delay(120, 260);
+          await HumanBehavior.mouseMove(page, clickX + 4, clickY + 3);
+          await HumanBehavior.delay(120, 240);
           await HumanBehavior.mouseMove(page, clickX, clickY);
-          await HumanBehavior.delay(200, 400);
+          await HumanBehavior.delay(200, 450);
+
+          const shouldMissClick = Math.random() < 0.12;
+          if (shouldMissClick) {
+            const missX = Math.max(
+              safePadding,
+              Math.min(viewport.width - safePadding, clickX + (Math.random() - 0.5) * 80),
+            );
+            const missY = Math.max(
+              safePadding,
+              Math.min(viewport.height - safePadding, clickY + (Math.random() - 0.5) * 50),
+            );
+            console.log(`Miss click before real click at: (${missX.toFixed(0)}, ${missY.toFixed(0)})`);
+            await page.mouse.click(missX, missY);
+            await HumanBehavior.delay(250, 600);
+          }
+
           await page.mouse.click(clickX, clickY);
         } else {
           await tweetLink.click();
@@ -789,6 +828,22 @@ export class XActions {
       await page.waitForURL(/\/status\/\d+/, { timeout: 10000 });
       console.log(`✅ Navigated to tweet detail page`);
     } catch (error) {
+      // Retry 1: direct link click then wait again
+      try {
+        await tweetLink.click({ timeout: 5000 });
+        await page.waitForURL(/\/status\/\d+/, { timeout: 7000 });
+        console.log(`✅ Navigated to tweet detail page (retry via direct link click)`);
+      } catch {
+        // continue with modal/final fallback checks
+      }
+
+      if (/\/status\/\d+/.test(page.url())) {
+        console.log(`✅ Navigated to tweet detail page`);
+        await HumanBehavior.delay(1500, 2500);
+        console.log(`✅ Clicked tweet #${index + 1}`);
+        return true;
+      }
+
       // Check if modal opened instead of navigation
       const modal = page.locator('[role="presentation"][aria-modal="true"]');
       if (await modal.count() > 0) {
@@ -803,8 +858,15 @@ export class XActions {
         await tweetLink.click();
         await page.waitForURL(/\/status\/\d+/, { timeout: 10000 });
       } else {
-        console.log(`⚠️ Navigation timeout - tweet may have opened in same tab or failed`);
-        return false;
+        // Retry 2: click whole tweet container then wait
+        try {
+          await tweet.click({ timeout: 5000 });
+          await page.waitForURL(/\/status\/\d+/, { timeout: 7000 });
+          console.log(`✅ Navigated to tweet detail page (retry via tweet container click)`);
+        } catch {
+          console.log(`⚠️ Navigation timeout - tweet may have opened in same tab or failed`);
+          return false;
+        }
       }
     }
     
@@ -979,9 +1041,21 @@ export class XActions {
       followVerified = false,
       extractDetailedInfo = false,
       maxUsersToProcess = 20,
+      excludeUsernames = [],
+      followProbabilityMin = 0.1,
+      followProbabilityMax = 0.2,
+      maxFollowsThisRun = Number.MAX_SAFE_INTEGER,
     } = options;
     const followMode: FollowMode = follow ?? (followVerified ? 'yes' : 'no');
     const shouldFollow = followMode === 'yes';
+    const excludedUsernames = new Set(
+      excludeUsernames.map((username) => normalizeUsername(username).toLowerCase()),
+    );
+    const normalizedFollowMin = Math.max(0, Math.min(1, followProbabilityMin));
+    const normalizedFollowMax = Math.max(normalizedFollowMin, Math.min(1, followProbabilityMax));
+    const followProbability =
+      normalizedFollowMin + Math.random() * (normalizedFollowMax - normalizedFollowMin);
+    const followCap = Math.max(0, Math.floor(maxFollowsThisRun));
 
     try {
       const tweetUrl = page.url();
@@ -1002,8 +1076,14 @@ export class XActions {
           const currentCount = await page.$$eval(TWEET_SELECTOR, (elements) => elements.length);
           if (currentCount === previousCount && i > 0) break;
           previousCount = currentCount;
-          await HumanBehavior.scroll(page, 900);
-          await HumanBehavior.delay(1400, 1900);
+          const scrollDistance = Math.floor(650 + Math.random() * 700);
+          await HumanBehavior.scroll(page, scrollDistance);
+          if (Math.random() < 0.3) {
+            const backDistance = -Math.floor(120 + Math.random() * 320);
+            await HumanBehavior.delay(300, 800);
+            await HumanBehavior.scroll(page, backDistance);
+          }
+          await HumanBehavior.delay(1100, 2100);
         }
       }
 
@@ -1092,7 +1172,9 @@ export class XActions {
       const verifiedUsers = allUsers.filter(
         (user) => user.isVerified || user.isGoldVerified || user.isGreyVerified,
       );
-      const selectedUsers = onlyVerified ? verifiedUsers : allUsers;
+      const selectedUsers = (onlyVerified ? verifiedUsers : allUsers).filter(
+        (user) => !excludedUsernames.has(normalizeUsername(user.username).toLowerCase()),
+      );
       let enrichedUsers = selectedUsers;
 
       if (extractDetailedInfo) {
@@ -1139,9 +1221,30 @@ export class XActions {
 
       if (shouldFollow) {
         for (const user of enrichedUsers) {
+          if (followedUsers.length >= followCap) {
+            console.log(`[follow] Reached run cap (${followCap}). Stopping follow actions.`);
+            break;
+          }
+
           if (!user.username) {
             skippedUsers.push('unknown');
             user.status = 'skipped';
+            continue;
+          }
+
+          if (excludedUsernames.has(normalizeUsername(user.username).toLowerCase())) {
+            skippedUsers.push(user.username);
+            user.status = 'skipped';
+            console.log(`[follow] Skip @${user.username}: already followed in verified_users (is_fl=1)`);
+            continue;
+          }
+
+          if (Math.random() > followProbability) {
+            skippedUsers.push(user.username);
+            user.status = 'skipped';
+            console.log(
+              `[follow] Skip @${user.username}: random policy (${Math.round(followProbability * 100)}% follow rate)`,
+            );
             continue;
           }
 
@@ -1238,7 +1341,9 @@ export class XActions {
       if (wasLiked) {
         console.log('✅ Tweet already liked');
         if (navigateToHomeOnSuccess) {
-          await this.goToHome(page);
+          await this.goToHome(page).catch((error) => {
+            console.warn('[likeCurrentTweet] Go home after already-liked state failed:', error);
+          });
         }
         return true;
       }
@@ -1273,7 +1378,9 @@ export class XActions {
       
       if (success && navigateToHomeOnSuccess) {
         console.log('[likeCurrentTweet] Navigating to home feed...');
-        await this.goToHome(page);
+        await this.goToHome(page).catch((error) => {
+          console.warn('[likeCurrentTweet] Go home after like success failed:', error);
+        });
         await HumanBehavior.delay(waitAfterLikeMs, waitAfterLikeMs + 500);
       }
       
@@ -1323,22 +1430,319 @@ export class XActions {
     return true;
   }
 
-  static async replyToTweet(page: Page, replyText: string): Promise<boolean> {
-    const replyButton = page.locator('[data-testid="reply"]').first();
-    if ((await replyButton.count()) === 0) return false;
+  static async replyToTweet(
+    page: Page,
+    replyInput: string | ReplyToTweetOptions,
+  ): Promise<boolean> {
+    const options: ReplyToTweetOptions =
+      typeof replyInput === 'string' ? { replyText: replyInput } : replyInput;
+    const {
+      replyText,
+      likeAfterReply = false,
+      stayOnPage = false,
+      maxReplyLength = 280,
+      timeoutMs = 15000,
+    } = options;
 
-    await HumanBehavior.clickLikeHuman(page, '[data-testid="reply"]');
-    await HumanBehavior.delay(800, 1200);
-    await HumanBehavior.type(page, TWEET_TEXTAREA_SELECTOR, replyText);
-    await HumanBehavior.delay(500, 1000);
+    if (!replyText || replyText.trim().length === 0) {
+      console.error('[replyToTweet] Reply text cannot be empty.');
+      return false;
+    }
 
-    const postButton = page.locator(POST_TWEET_BUTTON_SELECTOR).first();
-    if ((await postButton.count()) === 0) return false;
+    if (replyText.length > maxReplyLength) {
+      console.warn(
+        `[replyToTweet] Reply text exceeds ${maxReplyLength} characters. It may be truncated by X.`,
+      );
+    }
 
-    await HumanBehavior.clickLikeHuman(page, POST_TWEET_BUTTON_SELECTOR);
-    await HumanBehavior.delay(1500, 2500);
-    console.log(`Replied: ${replyText.substring(0, 50)}...`);
-    return true;
+    try {
+      const replyButton = page.locator('[data-testid="reply"]').first();
+      await replyButton.waitFor({ state: 'visible', timeout: timeoutMs });
+      await replyButton.hover();
+      await HumanBehavior.delay(300, 600);
+      await replyButton.click();
+      await HumanBehavior.delay(800, 1200);
+      console.log('[replyToTweet] Opened reply composer.');
+
+      const textarea = page.locator(TWEET_TEXTAREA_SELECTOR).first();
+      await textarea.waitFor({ state: 'visible', timeout: timeoutMs });
+      await textarea.click();
+      await HumanBehavior.delay(200, 400);
+      await textarea.fill(replyText);
+
+      const postButton = page
+        .locator('[data-testid="tweetButton"], [data-testid="tweetButtonInline"]')
+        .first();
+      await postButton.waitFor({ state: 'visible', timeout: timeoutMs });
+      await HumanBehavior.delay(500, 1000);
+      await postButton.click();
+      console.log('[replyToTweet] Reply posted.');
+
+      await HumanBehavior.delay(2000, 3000);
+
+      if (likeAfterReply) {
+        console.log('[replyToTweet] Attempting to like original tweet.');
+        await this.likeCurrentTweet(page, { navigateToHomeOnSuccess: false, timeoutMs });
+      }
+
+      if (!stayOnPage) {
+        await this.goToHome(page);
+      }
+
+      return true;
+    } catch (error) {
+      console.error('[replyToTweet] Failed to reply:', error);
+      return false;
+    }
+  }
+
+  static async autoReplyToTweet(
+    page: Page,
+    options: AutoReplyOptions = {},
+  ): Promise<boolean> {
+    const {
+      mode = 'template',
+      templatePath = './reply-templates.txt',
+      deepseekApiKey = process.env.DEEPSEEK_API_KEY ?? '',
+      deepseekModel = 'deepseek-chat',
+      likeBeforeReply = false,
+      stayOnPage = false,
+      maxReplyLength = 280,
+      minTweetLength = 5,
+      timeoutMs = 30000,
+      sourceTweetText = '',
+    } = options;
+
+    const timeoutPromise = new Promise<boolean>((_, reject) => {
+      setTimeout(() => reject(new Error('Auto-reply timeout')), timeoutMs);
+    });
+
+    try {
+      const run = this.autoReplyCore(page, {
+        mode,
+        templatePath,
+        deepseekApiKey,
+        deepseekModel,
+        likeBeforeReply,
+        stayOnPage,
+        maxReplyLength,
+        minTweetLength,
+        sourceTweetText,
+      });
+      return await Promise.race([run, timeoutPromise]);
+    } catch (error) {
+      console.error('[autoReply] Failed:', error);
+      return false;
+    }
+  }
+
+  private static async autoReplyCore(
+    page: Page,
+    options: Required<
+      Pick<
+        AutoReplyOptions,
+        | 'mode'
+        | 'templatePath'
+        | 'deepseekApiKey'
+        | 'deepseekModel'
+        | 'likeBeforeReply'
+        | 'stayOnPage'
+        | 'maxReplyLength'
+        | 'minTweetLength'
+        | 'sourceTweetText'
+      >
+    >,
+  ): Promise<boolean> {
+    const {
+      mode,
+      templatePath,
+      deepseekApiKey,
+      deepseekModel,
+      likeBeforeReply,
+      stayOnPage,
+      maxReplyLength,
+      minTweetLength,
+      sourceTweetText,
+    } = options;
+
+    let tweetText = sourceTweetText.trim();
+    if (!tweetText) {
+      tweetText = (await this.getCurrentTweetText(page)) ?? '';
+    }
+    if (!tweetText || tweetText.length < minTweetLength) {
+      console.log(`[autoReply] Skip: tweet too short (len=${tweetText.length})`);
+      return false;
+    }
+
+    let replyContent = '';
+    if (mode === 'template' || mode === 'hybrid') {
+      replyContent = await this.generateTemplateReply(tweetText, templatePath);
+      if (replyContent) {
+        console.log('[autoReply] Template reply selected');
+      } else if (mode === 'template') {
+        console.warn('[autoReply] No template matched in template mode');
+        return false;
+      }
+    }
+
+    if (!replyContent && (mode === 'ai' || mode === 'hybrid')) {
+      if (!deepseekApiKey) {
+        if (mode === 'ai') {
+          console.error('[autoReply] Missing DeepSeek API key in ai mode');
+          return false;
+        }
+        replyContent = 'Thanks for sharing!';
+      } else {
+        replyContent = await this.generateDeepSeekReply(
+          tweetText,
+          deepseekApiKey,
+          deepseekModel,
+          maxReplyLength,
+        );
+        if (!replyContent) replyContent = 'Interesting, thanks for sharing.';
+      }
+    }
+
+    if (!replyContent) {
+      console.error('[autoReply] Could not generate reply content');
+      return false;
+    }
+
+    if (replyContent.length > maxReplyLength) {
+      replyContent = `${replyContent.slice(0, maxReplyLength - 3)}...`;
+    }
+
+    if (likeBeforeReply) {
+      const liked = await this.likeCurrentTweet(page, { navigateToHomeOnSuccess: false });
+      console.log(liked ? '[autoReply] Liked before reply' : '[autoReply] Like-before-reply skipped/failed');
+      await HumanBehavior.delay(800, 1600);
+    }
+
+    return this.replyToTweet(page, {
+      replyText: replyContent,
+      likeAfterReply: false,
+      stayOnPage,
+      maxReplyLength,
+      timeoutMs: 15000,
+    });
+  }
+
+  private static async generateTemplateReply(tweetText: string, templatePath: string): Promise<string> {
+    try {
+      const content = await readFile(templatePath, 'utf8');
+      const lines = content
+        .split(/\r?\n/)
+        .map((line) => line.trim())
+        .filter((line) => line.length > 0 && !line.startsWith('#'));
+
+      const keywordTemplates: Array<{ keyword: string; replies: string[] }> = [];
+      const genericReplies: string[] = [];
+
+      for (const line of lines) {
+        const sepIndex = line.indexOf('=>');
+        if (sepIndex === -1) {
+          genericReplies.push(line);
+          continue;
+        }
+        const keyword = line.slice(0, sepIndex).trim().toLowerCase();
+        const replyPart = line.slice(sepIndex + 2).trim();
+        const replies = replyPart.split('|').map((r) => r.trim()).filter(Boolean);
+        if (!keyword || replies.length === 0) continue;
+        keywordTemplates.push({ keyword, replies });
+      }
+
+      const normalizedTweet = tweetText.toLowerCase();
+      for (const item of keywordTemplates) {
+        if (normalizedTweet.includes(item.keyword)) {
+          return item.replies[Math.floor(Math.random() * item.replies.length)] ?? '';
+        }
+      }
+
+      if (genericReplies.length > 0) {
+        return genericReplies[Math.floor(Math.random() * genericReplies.length)] ?? '';
+      }
+
+      return '';
+    } catch {
+      return '';
+    }
+  }
+
+  static async getCurrentTweetText(page: Page): Promise<string | null> {
+    try {
+      const statusId = page.url().match(/\/status\/(\d+)/)?.[1] ?? '';
+      await page.waitForSelector('article[data-testid="tweet"], [data-testid="tweetText"]', {
+        timeout: 10000,
+      });
+
+      return await page.evaluate((targetStatusId) => {
+        const getText = (article: Element): string =>
+          article.querySelector('[data-testid="tweetText"]')?.textContent?.trim() ?? '';
+
+        const articles = Array.from(document.querySelectorAll('article[data-testid="tweet"]'));
+        if (targetStatusId) {
+          for (const article of articles) {
+            const link = article.querySelector('a[href*="/status/"]')?.getAttribute('href') ?? '';
+            if (link.includes(`/status/${targetStatusId}`)) {
+              const txt = getText(article);
+              if (txt) return txt;
+            }
+          }
+        }
+
+        for (const article of articles) {
+          const txt = getText(article);
+          if (txt) return txt;
+        }
+
+        const fallback = document.querySelector('[data-testid="tweetText"]')?.textContent?.trim() ?? '';
+        return fallback || null;
+      }, statusId);
+    } catch {
+      return null;
+    }
+  }
+
+  private static async generateDeepSeekReply(
+    tweetText: string,
+    apiKey: string,
+    model: string,
+    maxLength: number,
+  ): Promise<string> {
+    const prompt = `You are a friendly X user. Reply naturally under ${maxLength} characters. Do not repeat the tweet.\nTweet: "${tweetText}"\nReply:`;
+    try {
+      const response = await fetch('https://api.deepseek.com/v1/chat/completions', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: `Bearer ${apiKey}`,
+        },
+        body: JSON.stringify({
+          model,
+          messages: [
+            { role: 'system', content: 'You write concise and natural replies on X.' },
+            { role: 'user', content: prompt },
+          ],
+          temperature: 0.8,
+          max_tokens: 100,
+          top_p: 0.9,
+        }),
+      });
+
+      if (!response.ok) {
+        const errorText = await response.text();
+        console.error(`[DeepSeek] API error ${response.status}: ${errorText}`);
+        return '';
+      }
+
+      const data = (await response.json()) as {
+        choices?: Array<{ message?: { content?: string } }>;
+      };
+      return data.choices?.[0]?.message?.content?.trim() ?? '';
+    } catch (error) {
+      console.error('[DeepSeek] Generation failed:', error);
+      return '';
+    }
   }
 
   static async bookmarkCurrentTweet(page: Page): Promise<boolean> {
@@ -1378,7 +1782,15 @@ export class XActions {
 
   static async goToHome(page: Page): Promise<void> {
     await page.goto(HOME_URL, { waitUntil: 'domcontentloaded' });
-    await this.waitForFeed(page);
+    try {
+      await this.waitForFeed(page);
+    } catch {
+      const hasTweets = (await page.locator(TWEET_SELECTOR).count()) > 0;
+      if (!hasTweets) {
+        throw new Error('Home feed did not become visible after navigation');
+      }
+      await HumanBehavior.delay(800, 1400);
+    }
     await HumanBehavior.delay(1500, 2500);
     console.log('Navigated to Home');
   }
@@ -1405,7 +1817,11 @@ export class XActions {
     await page.goto(`https://x.com/${normalizeUsername(username)}`, {
       waitUntil: 'domcontentloaded',
     });
-    await page.waitForSelector('[data-testid="UserName"]', { timeout: 10000 });
+    try {
+      await page.waitForSelector('[data-testid="UserName"]', { timeout: 10000 });
+    } catch {
+      await page.waitForSelector('[data-testid="primaryColumn"], main', { timeout: 8000 });
+    }
     await HumanBehavior.delay(1500, 2500);
     console.log(`Navigated to profile: @${normalizeUsername(username)}`);
   }
@@ -2039,10 +2455,10 @@ export class XActions {
         authorUsername: authorUsernameEl?.textContent?.replace('@', '') ?? '',
         tweetUrl: tweetLink ? `https://x.com${tweetLink}` : '',
         timestamp: timeEl?.getAttribute('datetime') ?? '',
-        likes: parseStat(ariaLabel, 'likes?'),
-        retweets: parseStat(ariaLabel, 'reposts?'),
-        replies: parseStat(ariaLabel, 'replies?'),
-        views: parseStat(ariaLabel, 'views?'),
+        likes: ariaLabel.match(/(\d+(?:,\d+)*(?:\.\d+)?[KkM]?)\s*likes?/i)?.[1] ?? '0',
+        retweets: ariaLabel.match(/(\d+(?:,\d+)*(?:\.\d+)?[KkM]?)\s*reposts?/i)?.[1] ?? '0',
+        replies: ariaLabel.match(/(\d+(?:,\d+)*(?:\.\d+)?[KkM]?)\s*replies?/i)?.[1] ?? '0',
+        views: ariaLabel.match(/(\d+(?:,\d+)*(?:\.\d+)?[KkM]?)\s*views?/i)?.[1] ?? '0',
         isVerified: Boolean(article.querySelector('[data-testid="icon-verified"]')),
         mediaUrls: Array.from(article.querySelectorAll<HTMLImageElement>('img[src]')).map(
           (image) => image.src,

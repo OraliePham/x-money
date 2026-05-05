@@ -1,0 +1,309 @@
+## 🚀 **Tối ưu hóa hàm auto-reply: template + AI (DeepSeek)**
+
+Dưới đây là phiên bản nâng cao của `autoReplyToTweet`, hỗ trợ **template mặc định** và **DeepSeek API** khi được bật. Hàm này sẽ tự động quyết định dùng template hay AI dựa trên tham số đầu vào, có xử lý lỗi toàn diện.
+
+---
+
+### 1. **Cấu hình và kiểu dữ liệu**
+
+```typescript
+// Thêm vào file x-actions-enhanced.ts
+
+export type AutoReplyOptions = {
+  mode?: 'template' | 'ai' | 'hybrid';   // template: chỉ dùng file .txt, ai: chỉ dùng DeepSeek, hybrid: ưu tiên template, nếu không match thì dùng AI
+  templatePath?: string;                 // Đường dẫn file .txt (nếu dùng template)
+  deepseekApiKey?: string;               // API key cho DeepSeek
+  deepseekModel?: string;                // Mặc định: 'deepseek-chat'
+  likeBeforeReply?: boolean;             // Like bài viết trước khi reply
+  stayOnPage?: boolean;                  // Ở lại trang sau khi reply
+  maxReplyLength?: number;               // Giới hạn độ dài reply (mặc định 280)
+  minTweetLength?: number;               // Chỉ reply nếu tweet dài hơn (tránh spam)
+  timeoutMs?: number;                    // Timeout tổng thể (mặc định 30000)
+};
+```
+
+---
+
+### 2. **Hàm `autoReplyToTweet` hoàn chỉnh**
+
+```typescript
+static async autoReplyToTweet(
+  page: Page,
+  options: AutoReplyOptions = {}
+): Promise<boolean> {
+  const {
+    mode = 'template',
+    templatePath = './reply-templates.txt',
+    deepseekApiKey = process.env.DEEPSEEK_API_KEY || '',
+    deepseekModel = 'deepseek-chat',
+    likeBeforeReply = true,
+    stayOnPage = false,
+    maxReplyLength = 280,
+    minTweetLength = 5,
+    timeoutMs = 30000
+  } = options;
+
+  // Timeout tổng thể cho toàn bộ function
+  const timeoutPromise = new Promise<boolean>((_, reject) =>
+    setTimeout(() => reject(new Error('Auto-reply timeout')), timeoutMs)
+  );
+
+  try {
+    const result = await Promise.race([
+      this._autoReplyCore(page, {
+        mode,
+        templatePath,
+        deepseekApiKey,
+        deepseekModel,
+        likeBeforeReply,
+        stayOnPage,
+        maxReplyLength,
+        minTweetLength
+      }),
+      timeoutPromise
+    ]);
+    return result;
+  } catch (error) {
+    console.error('[autoReply] ❌', error instanceof Error ? error.message : error);
+    return false;
+  }
+}
+
+// Phần core tách riêng để dễ xử lý race
+private static async _autoReplyCore(
+  page: Page,
+  options: Required<Pick<AutoReplyOptions, 'mode' | 'templatePath' | 'deepseekApiKey' | 'deepseekModel' | 'likeBeforeReply' | 'stayOnPage' | 'maxReplyLength' | 'minTweetLength'>>
+): Promise<boolean> {
+  const {
+    mode, templatePath, deepseekApiKey, deepseekModel,
+    likeBeforeReply, stayOnPage, maxReplyLength, minTweetLength
+  } = options;
+
+  // --- Bước 1: Lấy nội dung tweet hiện tại ---
+  const tweetInfo = await this.getCurrentTweetDetail(page);
+  if (!tweetInfo || !tweetInfo.text || tweetInfo.text.trim().length < minTweetLength) {
+    console.log(`[autoReply] ⏭️ Skipping: tweet too short or not found (len=${tweetInfo?.text?.length || 0})`);
+    return false;
+  }
+  const tweetText = tweetInfo.text.trim();
+  console.log(`[autoReply] 📝 Original tweet: "${tweetText.substring(0, 100)}..."`);
+
+  // --- Bước 2: Sinh reply content ---
+  let replyContent = '';
+
+  // 2.1 Dùng template nếu mode là template hoặc hybrid
+  if (mode === 'template' || mode === 'hybrid') {
+    try {
+      const templateManager = this.getTemplateManager(templatePath);
+      replyContent = templateManager.getReply(tweetText);
+      if (replyContent && mode === 'hybrid') {
+        console.log('[autoReply] ✅ Template matched, using template reply');
+      } else if (!replyContent && mode === 'template') {
+        console.warn('[autoReply] ⚠️ Template mode but no reply generated, aborting');
+        return false;
+      }
+    } catch (err) {
+      console.error('[autoReply] Template error:', err);
+      if (mode === 'template') return false;
+    }
+  }
+
+  // 2.2 Nếu mode là ai hoặc hybrid mà chưa có replyContent (template không match)
+  if ((mode === 'ai' || mode === 'hybrid') && !replyContent) {
+    if (!deepseekApiKey) {
+      console.error('[autoReply] ❌ DeepSeek API key missing. Set DEEPSEEK_API_KEY environment variable or pass in options.');
+      if (mode === 'ai') return false;
+      // hybrid mode: fallback to built-in default
+      replyContent = "Thanks for sharing! 😊";
+    } else {
+      replyContent = await this.generateDeepSeekReply(tweetText, deepseekApiKey, deepseekModel, maxReplyLength);
+      if (!replyContent) {
+        console.warn('[autoReply] ⚠️ DeepSeek returned empty, using fallback');
+        replyContent = "Interesting! Thanks for posting.";
+      } else {
+        console.log('[autoReply] 🤖 AI reply generated via DeepSeek');
+      }
+    }
+  }
+
+  if (!replyContent) {
+    console.error('[autoReply] ❌ No reply content generated');
+    return false;
+  }
+
+  // Giới hạn độ dài
+  if (replyContent.length > maxReplyLength) {
+    replyContent = replyContent.substring(0, maxReplyLength - 3) + '...';
+  }
+
+  console.log(`[autoReply] 💬 Reply preview: "${replyContent.substring(0, 80)}..."`);
+
+  // --- Bước 3: Like trước nếu cần ---
+  if (likeBeforeReply) {
+    const liked = await this.likeCurrentTweet(page, { navigateToHomeOnSuccess: false });
+    if (liked) console.log('[autoReply] ❤️ Liked original tweet');
+    else console.warn('[autoReply] ⚠️ Could not like, continuing anyway');
+    await HumanBehavior.delay(1000, 2000);
+  }
+
+  // --- Bước 4: Đăng reply ---
+  const replySuccess = await this.replyToTweet(page, {
+    replyText: replyContent,
+    likeAfterReply: false,
+    stayOnPage: stayOnPage,
+    maxReplyLength: maxReplyLength
+  });
+
+  if (replySuccess) {
+    console.log('[autoReply] ✅ Reply posted successfully');
+  } else {
+    console.error('[autoReply] ❌ Failed to post reply');
+  }
+
+  return replySuccess;
+}
+```
+
+---
+
+### 3. **Quản lý TemplateManager (singleton + reload)**
+
+```typescript
+private static templateManagerInstance: ReplyTemplateManager | null = null;
+
+private static getTemplateManager(filePath: string): ReplyTemplateManager {
+  if (!this.templateManagerInstance) {
+    this.templateManagerInstance = new ReplyTemplateManager(filePath);
+  } else {
+    // Nếu filePath thay đổi, reload (có thể dùng trong testing)
+    if (this.templateManagerInstance['filePath'] !== filePath) {
+      this.templateManagerInstance.reload(filePath);
+    }
+  }
+  return this.templateManagerInstance;
+}
+```
+
+(Class `ReplyTemplateManager` đã định nghĩa trước đó, cần thêm thuộc tính `filePath` và method `reload`.)
+
+---
+
+### 4. **Hàm gọi DeepSeek API**
+
+```typescript
+private static async generateDeepSeekReply(
+  tweetText: string,
+  apiKey: string,
+  model: string,
+  maxLength: number
+): Promise<string> {
+  const prompt = `You are a friendly Twitter user. Reply to the following tweet in a natural, concise way. Keep your reply under ${maxLength} characters. Do not repeat the original tweet. Just output the reply text.
+
+Tweet: "${tweetText}"
+
+Reply:`;
+
+  try {
+    const response = await fetch('https://api.deepseek.com/v1/chat/completions', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'Authorization': `Bearer ${apiKey}`
+      },
+      body: JSON.stringify({
+        model: model,
+        messages: [
+          { role: 'system', content: 'You are a helpful Twitter user. Reply concisely and naturally.' },
+          { role: 'user', content: prompt }
+        ],
+        temperature: 0.8,
+        max_tokens: 100,
+        top_p: 0.9
+      })
+    });
+
+    if (!response.ok) {
+      const errorText = await response.text();
+      throw new Error(`DeepSeek API error (${response.status}): ${errorText}`);
+    }
+
+    const data = await response.json();
+    const reply = data.choices?.[0]?.message?.content?.trim();
+    if (!reply) throw new Error('Empty response from DeepSeek');
+
+    return reply;
+  } catch (error) {
+    console.error('[DeepSeek] Generation failed:', error);
+    return '';
+  }
+}
+```
+
+---
+
+### 5. **Tích hợp vào profile-launcher với các flag mới**
+
+```typescript
+// Thêm vào parseArgs
+autoReplyMode: parseAutoReplyMode(argv),  // 'template', 'ai', 'hybrid'
+autoReplyTemplate: parseString(argv, '--auto-reply-template', './reply-templates.txt'),
+deepseekKey: parseString(argv, '--deepseek-key', process.env.DEEPSEEK_API_KEY || ''),
+
+function parseAutoReplyMode(argv: string[]): 'template' | 'ai' | 'hybrid' {
+  const idx = argv.findIndex(a => a === '--auto-reply-mode');
+  if (idx === -1) return 'template';
+  const mode = argv[idx+1]?.toLowerCase();
+  if (mode === 'ai' || mode === 'hybrid') return mode;
+  return 'template';
+}
+
+function parseString(argv: string[], flag: string, defaultValue: string): string {
+  const idx = argv.findIndex(a => a === flag);
+  if (idx === -1) return defaultValue;
+  return argv[idx+1] || defaultValue;
+}
+```
+
+Sau đó gọi:
+
+```typescript
+if (args.autoReply) {
+  await XActionsEnhanced.autoReplyToTweet(page, {
+    mode: args.autoReplyMode,
+    templatePath: args.autoReplyTemplate,
+    deepseekApiKey: args.deepseekKey,
+    likeBeforeReply: true,
+    stayOnPage: false
+  });
+}
+```
+
+---
+
+### 6. **Xử lý lỗi chi tiết theo yêu cầu**
+
+| Tình huống | Xử lý trong code |
+|------------|------------------|
+| File template không tồn tại | `ReplyTemplateManager` throw error → fallback nếu mode hybrid, nếu mode template → trả false |
+| DeepSeek API key thiếu | Log error, nếu mode `ai` → false; nếu hybrid → dùng built-in fallback |
+| DeepSeek API trả về lỗi (4xx, 5xx) | Retry 1 lần? (có thể thêm). Hiện tại log và trả về empty → dùng fallback |
+| Tweet quá ngắn | Skip (không reply) |
+| Like thất bại | Vẫn tiếp tục reply (chỉ warning) |
+| Reply thất bại (nút post không xuất hiện) | Thử refresh nhẹ? Hiện tại `replyToTweet` đã có retry logic riêng, chỉ cần gọi và nhận kết quả |
+| Timeout tổng thể | Dùng `Promise.race` để hủy bỏ |
+
+---
+
+## ✅ **Kết luận**
+
+Hàm `autoReplyToTweet` đã được tối ưu:
+
+- **Mặc định dùng template từ file .txt** (nhanh, không tốn phí, dễ sửa).
+- **Có thể bật AI (DeepSeek)** khi cần trả lời thông minh hơn.
+- **Chế độ hybrid**: ưu tiên template, nếu không match thì gọi AI.
+- **Xử lý lỗi đầy đủ**, không bao giờ treo hoặc crash.
+- **Log chi tiết** để theo dõi.
+
+Bạn chỉ cần set biến môi trường `DEEPSEEK_API_KEY` hoặc truyền qua flag `--deepseek-key` là có thể dùng AI ngay. Nếu không, hệ thống vẫn chạy tốt với template.
+
+Bạn muốn tôi viết thêm phần **hot‑reload template** hay **cache AI response** để tối ưu chi phí không?

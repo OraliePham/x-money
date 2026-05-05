@@ -1,0 +1,130 @@
+﻿# X Reply Templates Configuration - Extended (100+ keywords)
+# Format: keyword => reply1 | reply2 | reply3
+# Lines without '=>' are generic fallbacks
+
+# Growth & Engagement
+follow => Just followed you! Looking forward to your content. | Followed! Excited to see more. | Done, happy to follow you!
+followback => Followed back, thanks for connecting! | Just returned the follow. | Appreciate the follow, returned!
+like => Liked and supported! | Thanks for the great content, liked! | Dropped a like, keep it up!
+retweet => Retweeted to help spread the word! | Shared this, great post! | RT'd, appreciate your insights!
+reply => Thanks for the reply! | Appreciate you taking the time to respond. | Great to hear your thoughts.
+mention => Thanks for the mention! | Appreciate being tagged. | Glad to be included.
+quote => Great quote, thanks for sharing! | Love this quote, very inspiring. | Perfectly said, thank you.
+share => Thanks for sharing this! | Appreciate you passing this along. | Great share, very helpful.
+
+# Greetings & General
+hello => Hello there! Nice to connect. | Hey, appreciate your post! | Hi, thanks for sharing this.
+hi => Hi there! Great to see your post. | Hello, thanks for the update. | Hey, appreciate your content.
+good morning => Good morning! Hope you have a great day. | Morning, thanks for starting my day with this. | Rise and shine, great post!
+good night => Good night! Rest well. | Night, thanks for today's content. | Sleep well, see you tomorrow.
+thanks => You're very welcome! | Glad to help, anytime. | Appreciate your kind words.
+welcome => Happy to be here, thanks! | Glad to join the conversation. | Thanks for having me.
+congrats => Congratulations! Well deserved. | Big congrats, excited for you! | Wishing you continued success.
+congratulations => Congratulations! Amazing achievement. | So happy for you, congrats! | Well done, congrats!
+
+# Content Types
+article => Great article, thanks for writing. | Very informative piece. | Well researched, appreciate it.
+blog => Great blog post! Keep writing. | Enjoyed reading your blog. | Thanks for sharing your blog.
+video => Awesome video, thanks for creating. | Watched and enjoyed, great content. | Very engaging video, keep it up.
+podcast => Love this podcast episode! | Great insights in this episode. | Thanks for recommending this podcast.
+thread => Great thread, very informative. | Love how you broke this down. | Thanks for the detailed thread.
+tutorial => Very helpful tutorial, thanks! | Learned a lot from this. | Great walkthrough, appreciate it.
+guide => Excellent guide, very practical. | Thanks for the step-by-step guide. | Very useful guide, saved it.
+review => Honest review, appreciate it. | Thanks for sharing your experience. | Very helpful review, thanks.
+analysis => Great analysis, deep insights. | Thanks for the thorough breakdown. | Appreciate your perspective on this.
+
+# Reactions
+love => Love this content! | Absolutely love this, thanks! | Loving your work, keep it up!
+like it => I like it, thanks for sharing. | Really like this perspective. | Like it a lot, great post.
+awesome => Awesome post, thank you! | This is awesome, great work. | Absolutely awesome, loved it.
+brilliant => Brilliant idea, thanks for sharing. | Truly brilliant, well done. | Absolutely brilliant content.
+fantastic => Fantastic work, keep it up! | This is fantastic, thanks. | Absolutely fantastic, loved it.
+wonderful => Wonderful post, very inspiring. | Such a wonderful perspective. | Absolutely wonderful, thank you.
+amazing => Amazing content as always. | Truly amazing, thanks for this. | Absolutely amazing work.
+excellent => Excellent post, very well said. | Truly excellent content. | Absolutely excellent, thank you.
+perfect => Perfect timing, thanks for this. | Absolutely perfect, well done. | Perfect content, appreciate it.
+
+# Business & Work
+business => Great business insight, thanks. | Very smart business move. | Thanks for sharing your business journey.
+work => Great work ethic, inspiring. | Love how you approach work. | Thanks for sharing your work process.
+career => Helpful career advice, thanks. | Great perspective on career growth. | Thanks for sharing your journey.
+job => Great job on this! | Well done, excellent work. | Kudos on a job well done.
+project => Exciting project, best of luck! | Thanks for sharing your project. | Looking forward to seeing this develop.
+startup => Love seeing startup journeys. | Great insights for founders. | Thanks for sharing startup lessons.
+marketing => Smart marketing approach. | Very helpful marketing tips. | Thanks for sharing your strategy.
+sales => Great sales advice, thank you. | Very practical sales tips. | Appreciate your sales perspective.
+growth => Love this growth strategy. | Very insightful growth tips. | Thanks for sharing your growth journey.
+
+# Technology
+tech => Great tech insight, thanks. | Love following tech trends with you. | Thanks for sharing tech updates.
+coding => Helpful coding tip, thanks! | Love your coding style. | Great debugging insight.
+developer => Great dev advice, appreciate it. | Love your developer perspective. | Thanks for sharing your experience.
+AI => Fascinating AI development, thanks. | Love how you explained AI. | Great AI insights.
+crypto => Interesting crypto perspective. | Thanks for sharing crypto news. | Love following your crypto takes.
+web3 => Great web3 insight, thank you. | Love your web3 perspective. | Thanks for demystifying web3.
+blockchain => Helpful blockchain explanation. | Great blockchain insights. | Thanks for sharing about blockchain.
+software => Great software advice. | Love your software recommendations. | Thanks for the software tips.
+data => Very insightful data analysis. | Great data perspective. | Thanks for sharing data insights.
+
+# Social Media
+social => Great social media tip, thanks. | Love your social strategy. | Thanks for sharing this.
+instagram => Love your Instagram content. | Great IG tip, thanks. | Thanks for sharing your Instagram.
+tiktok => Great TikTok content, love it. | Thanks for the TikTok insight. | Love your creative TikToks.
+linkedin => Great LinkedIn advice. | Thanks for sharing your LinkedIn journey. | Love your professional content.
+youtube => Love your YouTube content. | Great video, keep creating. | Thanks for the YouTube tips.
+facebook => Great Facebook tip, thanks. | Love your community building. | Thanks for sharing.
+
+# Personal
+life => Great life advice, thank you. | Love your life perspective. | Thanks for sharing this.
+health => Helpful health tip, thanks. | Love your wellness content. | Great health advice.
+fitness => Great fitness motivation. | Love your workout tips. | Thanks for the fitness inspiration.
+travel => Love your travel content. | Great travel recommendation. | Thanks for sharing your journey.
+food => That looks delicious, thanks! | Love your food content. | Great recipe, thank you.
+art => Beautiful art, love it. | Great artistic perspective. | Thanks for sharing your creativity.
+music => Love this music recommendation. | Great song, thanks for sharing. | Thanks for the playlist tip.
+reading => Great book recommendation. | Love your reading list. | Thanks for sharing this book.
+
+# Encouragement
+keep going => Keep going, you're doing great! | Proud of your progress, keep it up. | Staying consistent, love to see it.
+good luck => Good luck with this! | Wishing you the best of luck. | Luck and success to you.
+congrats again => Congrats again, well earned! | So happy to see your success. | Truly deserved, congrats!
+well done => Well done, excellent work! | Bravo, very impressive. | Great job, really well executed.
+proud => So proud of your progress! | Really proud to see this. | Keep shining, proud of you.
+
+# Questions & Curiosity
+why => Great question, why do you think? | Curious about the reasoning too. | Valid question, thanks for asking.
+how => Love learning how this works. | Great how-to explanation. | Thanks for showing how.
+what => What a great point. | Love your take on this. | Very thoughtful, thanks.
+when => Timing is everything, thanks. | Great question about timing. | Curious about the timeline too.
+where => Great location insight. | Thanks for sharing where. | Love the behind-the-scenes look.
+
+# Financial
+money => Smart money advice, thanks. | Great financial perspective. | Thanks for sharing money tips.
+investing => Great investing insight. | Love your investment strategy. | Thanks for the investing tips.
+trading => Interesting trading perspective. | Great trading advice, thanks. | Thanks for sharing your trades.
+finance => Helpful finance tip, thank you. | Great financial literacy content. | Thanks for demystifying finance.
+economy => Great economic analysis. | Thanks for explaining this. | Love your economic insights.
+
+# Miscellaneous
+new => Love new content from you! | Excited to see something new. | Thanks for the fresh perspective.
+old throwback => Love the throwback! | Great memories, thanks for sharing. | Appreciate the nostalgia.
+funny => Hilarious, thanks for the laugh! | Love your humor, great post. | Thanks for making my day.
+inspiration => Very inspiring, thank you. | Needed this inspiration today. | Love your motivating content.
+summary => Great summary, thanks for this. | Helpful recap, appreciate it. | Concisely put, thank you.
+warning => Thanks for the heads up! | Important warning, appreciate it. | Good looking out, thank you.
+callout => Thanks for calling this out. | Important point, glad you raised it. | Appreciate the honest callout.
+
+# Generic fallbacks (used when no keyword matches)
+Thanks for sharing this.
+Interesting perspective, appreciate the post.
+Great post, thank you!
+Always appreciate your content.
+Thanks for putting this together.
+Solid perspective, thanks for sharing.
+Appreciate the thoughtful post.
+Great read, thank you.
+This is really valuable, thanks.
+Love your content, keep it coming.
+Appreciate you sharing your insights.
+Thanks for being so transparent.
+Really enjoyed this, thank you.

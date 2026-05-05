@@ -367,6 +367,37 @@ export class SQLiteProfileStorage {
     return successCount;
   }
 
+  getFollowedVerifiedUsernames(profileId: string): string[] {
+    const rows = this.db
+      .prepare(
+        `
+        SELECT username
+        FROM verified_users
+        WHERE profile_id = ? AND is_fl = 1
+      `,
+      )
+      .all(profileId) as Array<{ username: string }>;
+
+    return rows.map((row) => row.username).filter((username) => username.length > 0);
+  }
+
+  countRecentFollowedUsers(profileId: string, minutes = 5): number {
+    const safeMinutes = Number.isFinite(minutes) && minutes > 0 ? Math.floor(minutes) : 5;
+    const row = this.db
+      .prepare(
+        `
+        SELECT COUNT(1) AS total
+        FROM verified_users
+        WHERE profile_id = ?
+          AND is_fl = 1
+          AND datetime(updated_at) >= datetime('now', '-' || ? || ' minutes')
+      `,
+      )
+      .get(profileId, safeMinutes) as { total: number } | undefined;
+
+    return row?.total ?? 0;
+  }
+
   deleteProfile(profileId: string, softDelete = true): void {
     if (softDelete) {
       this.db.prepare('UPDATE profiles SET is_active = 0 WHERE id = ?').run(profileId);
