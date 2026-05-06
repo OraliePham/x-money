@@ -75,6 +75,10 @@ type SessionRow = {
   login_time: string;
 };
 
+type ReplyHistoryRow = {
+  reply_text: string;
+};
+
 function parseJson<T>(value: string, fallback: T): T {
   try {
     return JSON.parse(value) as T;
@@ -398,6 +402,52 @@ export class SQLiteProfileStorage {
     return row?.total ?? 0;
   }
 
+  saveReplyHistory(
+    profileId: string,
+    replyText: string,
+    options: {
+      tweetId?: string;
+      tweetText?: string;
+      replyMode?: 'template' | 'ai' | 'hybrid' | 'manual';
+    } = {},
+  ): void {
+    const normalizedReply = replyText.trim();
+    if (!normalizedReply) return;
+
+    this.db
+      .prepare(
+        `
+        INSERT INTO reply_history (
+          profile_id, tweet_id, tweet_text, reply_text, reply_mode, created_at
+        ) VALUES (?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
+      `,
+      )
+      .run(
+        profileId,
+        options.tweetId?.trim() || null,
+        options.tweetText?.trim().slice(0, 5000) || null,
+        normalizedReply.slice(0, 1000),
+        options.replyMode ?? 'template',
+      );
+  }
+
+  getRecentReplyTexts(profileId: string, limit = 120): string[] {
+    const safeLimit = Number.isFinite(limit) && limit > 0 ? Math.floor(limit) : 120;
+    const rows = this.db
+      .prepare(
+        `
+        SELECT reply_text
+        FROM reply_history
+        WHERE profile_id = ?
+        ORDER BY datetime(created_at) DESC
+        LIMIT ?
+      `,
+      )
+      .all(profileId, safeLimit) as ReplyHistoryRow[];
+
+    return rows.map((row) => row.reply_text.trim()).filter((text) => text.length > 0);
+  }
+
   deleteProfile(profileId: string, softDelete = true): void {
     if (softDelete) {
       this.db.prepare('UPDATE profiles SET is_active = 0 WHERE id = ?').run(profileId);
@@ -495,6 +545,17 @@ export class SQLiteProfileStorage {
         updated_at TEXT DEFAULT CURRENT_TIMESTAMP
       );
 
+      CREATE TABLE IF NOT EXISTS reply_history (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        profile_id TEXT NOT NULL,
+        tweet_id TEXT,
+        tweet_text TEXT,
+        reply_text TEXT NOT NULL,
+        reply_mode TEXT DEFAULT 'template',
+        created_at TEXT DEFAULT CURRENT_TIMESTAMP,
+        FOREIGN KEY (profile_id) REFERENCES profiles(id) ON DELETE CASCADE
+      );
+
       CREATE INDEX IF NOT EXISTS idx_profiles_username ON profiles(username);
       CREATE INDEX IF NOT EXISTS idx_profiles_last_login ON profiles(last_login);
       CREATE INDEX IF NOT EXISTS idx_sessions_profile_id ON sessions(profile_id);
@@ -506,6 +567,8 @@ export class SQLiteProfileStorage {
       CREATE INDEX IF NOT EXISTS idx_verified_users_is_fl ON verified_users(is_fl);
       CREATE INDEX IF NOT EXISTS idx_verified_users_update_time ON verified_users(update_time);
       CREATE INDEX IF NOT EXISTS idx_verified_users_verified_type ON verified_users(verified_type);
+      CREATE INDEX IF NOT EXISTS idx_reply_history_profile_created_at ON reply_history(profile_id, created_at);
+      CREATE INDEX IF NOT EXISTS idx_reply_history_profile_reply_text ON reply_history(profile_id, reply_text);
     `);
   }
 }

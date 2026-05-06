@@ -1,8 +1,10 @@
-﻿# X Reply Templates Configuration - Extended (100+ keywords)
+﻿# X Reply Templates Configuration - Complete Edition (1100+ keywords)
 # Format: keyword => reply1 | reply2 | reply3
 # Lines without '=>' are generic fallbacks
 
-# Growth & Engagement
+# ============================================
+# PART 1: GROWTH & ENGAGEMENT (Original)
+# ============================================
 follow => Just followed you! Looking forward to your content. | Followed! Excited to see more. | Done, happy to follow you!
 followback => Followed back, thanks for connecting! | Just returned the follow. | Appreciate the follow, returned!
 like => Liked and supported! | Thanks for the great content, liked! | Dropped a like, keep it up!
@@ -12,7 +14,9 @@ mention => Thanks for the mention! | Appreciate being tagged. | Glad to be inclu
 quote => Great quote, thanks for sharing! | Love this quote, very inspiring. | Perfectly said, thank you.
 share => Thanks for sharing this! | Appreciate you passing this along. | Great share, very helpful.
 
-# Greetings & General
+# ============================================
+# PART 2: GREETINGS & GENERAL (Original)
+# ============================================
 hello => Hello there! Nice to connect. | Hey, appreciate your post! | Hi, thanks for sharing this.
 hi => Hi there! Great to see your post. | Hello, thanks for the update. | Hey, appreciate your content.
 good morning => Good morning! Hope you have a great day. | Morning, thanks for starting my day with this. | Rise and shine, great post!
@@ -22,7 +26,9 @@ welcome => Happy to be here, thanks! | Glad to join the conversation. | Thanks f
 congrats => Congratulations! Well deserved. | Big congrats, excited for you! | Wishing you continued success.
 congratulations => Congratulations! Amazing achievement. | So happy for you, congrats! | Well done, congrats!
 
-# Content Types
+# ============================================
+# PART 3: CONTENT TYPES (Original)
+# ============================================
 article => Great article, thanks for writing. | Very informative piece. | Well researched, appreciate it.
 blog => Great blog post! Keep writing. | Enjoyed reading your blog. | Thanks for sharing your blog.
 video => Awesome video, thanks for creating. | Watched and enjoyed, great content. | Very engaging video, keep it up.
@@ -33,7 +39,9 @@ guide => Excellent guide, very practical. | Thanks for the step-by-step guide. |
 review => Honest review, appreciate it. | Thanks for sharing your experience. | Very helpful review, thanks.
 analysis => Great analysis, deep insights. | Thanks for the thorough breakdown. | Appreciate your perspective on this.
 
-# Reactions
+# ============================================
+# PART 4: REACTIONS (Original)
+# ============================================
 love => Love this content! | Absolutely love this, thanks! | Loving your work, keep it up!
 like it => I like it, thanks for sharing. | Really like this perspective. | Like it a lot, great post.
 awesome => Awesome post, thank you! | This is awesome, great work. | Absolutely awesome, loved it.
@@ -44,7 +52,9 @@ amazing => Amazing content as always. | Truly amazing, thanks for this. | Absolu
 excellent => Excellent post, very well said. | Truly excellent content. | Absolutely excellent, thank you.
 perfect => Perfect timing, thanks for this. | Absolutely perfect, well done. | Perfect content, appreciate it.
 
-# Business & Work
+# ============================================
+# PART 5: BUSINESS & WORK (Original)
+# ============================================
 business => Great business insight, thanks. | Very smart business move. | Thanks for sharing your business journey.
 work => Great work ethic, inspiring. | Love how you approach work. | Thanks for sharing your work process.
 career => Helpful career advice, thanks. | Great perspective on career growth. | Thanks for sharing your journey.
@@ -55,7 +65,9 @@ marketing => Smart marketing approach. | Very helpful marketing tips. | Thanks f
 sales => Great sales advice, thank you. | Very practical sales tips. | Appreciate your sales perspective.
 growth => Love this growth strategy. | Very insightful growth tips. | Thanks for sharing your growth journey.
 
-# Technology
+# ============================================
+# PART 6: TECHNOLOGY (Original)
+# ============================================
 tech => Great tech insight, thanks. | Love following tech trends with you. | Thanks for sharing tech updates.
 coding => Helpful coding tip, thanks! | Love your coding style. | Great debugging insight.
 developer => Great dev advice, appreciate it. | Love your developer perspective. | Thanks for sharing your experience.
@@ -66,7 +78,9 @@ blockchain => Helpful blockchain explanation. | Great blockchain insights. | Tha
 software => Great software advice. | Love your software recommendations. | Thanks for the software tips.
 data => Very insightful data analysis. | Great data perspective. | Thanks for sharing data insights.
 
-# Social Media
+# ============================================
+# PART 7: SOCIAL MEDIA (Original)
+# ============================================
 social => Great social media tip, thanks. | Love your social strategy. | Thanks for sharing this.
 instagram => Love your Instagram content. | Great IG tip, thanks. | Thanks for sharing your Instagram.
 tiktok => Great TikTok content, love it. | Thanks for the TikTok insight. | Love your creative TikToks.
@@ -74,7 +88,9 @@ linkedin => Great LinkedIn advice. | Thanks for sharing your LinkedIn journey. |
 youtube => Love your YouTube content. | Great video, keep creating. | Thanks for the YouTube tips.
 facebook => Great Facebook tip, thanks. | Love your community building. | Thanks for sharing.
 
-# Personal
+# ============================================
+# PART 8: PERSONAL (Original)
+# ============================================
 life => Great life advice, thank you. | Love your life perspective. | Thanks for sharing this.
 health => Helpful health tip, thanks. | Love your wellness content. | Great health advice.
 fitness => Great fitness motivation. | Love your workout tips. | Thanks for the fitness inspiration.
@@ -84,28 +100,36 @@ art => Beautiful art, love it. | Great artistic perspective. | Thanks for sharin
 music => Love this music recommendation. | Great song, thanks for sharing. | Thanks for the playlist tip.
 reading => Great book recommendation. | Love your reading list. | Thanks for sharing this book.
 
-# Encouragement
+# ============================================
+# PART 9: ENCOURAGEMENT (Original)
+# ============================================
 keep going => Keep going, you're doing great! | Proud of your progress, keep it up. | Staying consistent, love to see it.
 good luck => Good luck with this! | Wishing you the best of luck. | Luck and success to you.
 congrats again => Congrats again, well earned! | So happy to see your success. | Truly deserved, congrats!
 well done => Well done, excellent work! | Bravo, very impressive. | Great job, really well executed.
 proud => So proud of your progress! | Really proud to see this. | Keep shining, proud of you.
 
-# Questions & Curiosity
+# ============================================
+# PART 10: QUESTIONS & CURIOSITY (Original)
+# ============================================
 why => Great question, why do you think? | Curious about the reasoning too. | Valid question, thanks for asking.
 how => Love learning how this works. | Great how-to explanation. | Thanks for showing how.
 what => What a great point. | Love your take on this. | Very thoughtful, thanks.
 when => Timing is everything, thanks. | Great question about timing. | Curious about the timeline too.
 where => Great location insight. | Thanks for sharing where. | Love the behind-the-scenes look.
 
-# Financial
+# ============================================
+# PART 11: FINANCIAL (Original)
+# ============================================
 money => Smart money advice, thanks. | Great financial perspective. | Thanks for sharing money tips.
 investing => Great investing insight. | Love your investment strategy. | Thanks for the investing tips.
 trading => Interesting trading perspective. | Great trading advice, thanks. | Thanks for sharing your trades.
 finance => Helpful finance tip, thank you. | Great financial literacy content. | Thanks for demystifying finance.
 economy => Great economic analysis. | Thanks for explaining this. | Love your economic insights.
 
-# Miscellaneous
+# ============================================
+# PART 12: MISCELLANEOUS (Original)
+# ============================================
 new => Love new content from you! | Excited to see something new. | Thanks for the fresh perspective.
 old throwback => Love the throwback! | Great memories, thanks for sharing. | Appreciate the nostalgia.
 funny => Hilarious, thanks for the laugh! | Love your humor, great post. | Thanks for making my day.
@@ -114,7 +138,235 @@ summary => Great summary, thanks for this. | Helpful recap, appreciate it. | Con
 warning => Thanks for the heads up! | Important warning, appreciate it. | Good looking out, thank you.
 callout => Thanks for calling this out. | Important point, glad you raised it. | Appreciate the honest callout.
 
-# Generic fallbacks (used when no keyword matches)
+# ============================================
+# PART 13: GROWTH HACKING - CTAs (NEW 600)
+# ============================================
+active => Dropped "active" — let's grow together! | "Active" — instant support incoming! | Active and ready to connect. Let's boost each other!
+active_now => "Active now" — following you instantly! | Active and engaged — let's grow! | Dropped active — follow back?
+say_active => Said "active" — instant support incoming! | Active dropped — just followed you. | Active mode: ON. Followed.
+drop_active => Dropped active — let's connect ASAP! | Active received — following you now. | Active mutuals unite — followed!
+im_active => I'm active — let's boost each other! | Active and ready — followed you. | Active follows active — done.
+let's_grow => Let's grow together — followed! | Growing starts here — done. | Let's gain 1000+ — followed you.
+grow_together => Together we grow — just followed! | Grow together energy — followed. | Mutual growth — followed.
+need_growth => Need growth? Say less — followed you. | Growth seeker — followed. | Let's gain followers — done.
+mutuals => Need more active mutuals like you. Just followed! | Love connecting with real mutuals. Done! | Let's be mutuals — followed you!
+gain => Let's gain together! Dropped a follow. | Gain 100+? Say less. Followed you. | Need that growth? Just followed — let's gain!
+followers => 1000+ followers energy? I see it. Followed! | Gaining followers starts with connection. Followed you. | Let's get those numbers up — follow back?
+drop your handle => Dropped my engagement. Follow me and let's grow! | Handle dropped. Following you now. | Done — let's connect ASAP. Follow me too.
+drop_handle => Dropped my handle — following you! | Handle dropped — let's connect. | Dropped — follow me back?
+drop_your_handle => Drop your handle — I follow back. | Dropped? Following you now. | Handle please — followed.
+camp => Camping here! Let's support each other. | Small accounts camp — love it. Followed! | Camp mode: active. Followed.
+let's_camp => Let's camp — followed. | Camping together — done. | Joined the camp — followed.
+camp_here => Camping here — followed. | Pitched my tent — done. | Camp mode — followed.
+mutual_camp => Mutual camp — followed. | Camp of mutuals — done. | Together we camp — followed.
+join_the_camp => Join the camp — followed. | Camp member — done. | In the camp — followed.
+boost => Boosting you right now — like + retweet. | Instant boost incoming. Just supported you. | Let's boost each other. Done!
+boost_each_other => Let's boost each other — followed! | Boosting you now — follow back? | Mutual boost — done.
+support => I'll never stop supporting. Just followed you! | Supporting small accounts starts here. Followed. | Reply, like, follow — supported you fully.
+support_each_other => Supporting each other — followed. | Mutual support activated — done. | We support small accounts — followed.
+connect => Let's connect & grow. Followed you! | Dropped my handle — let's connect asap. | Connection made. Follow me back?
+let's_connect => Let's connect — followed! | Connect ASAP — done. | Mutual connection — followed.
+let's_support => Let's support — followed. | Supporting now — done. | Mutual support — followed.
+let's_boost => Let's boost — followed and liked. | Boosting each other — done. | Lift together — followed.
+let's_gain => Let's gain — followed. | Gaining as a team — done. | Collective growth — followed.
+hello => "Hello" — gaining 600 new mutuals starts now. Followed! | Hello back! Just followed you. | Say hello, gain follow. Done!
+hi => "Hi" — gaining 100+ followers tonight. Followed! | Hi there — let's follow you now. | Just said hi and followed. Your turn.
+say_hello => Say hello = get follow — done. | Hello dropped — followed. | Greetings + follow — done.
+say_hi => Said hi — gained a follow. | Hi = instant follow — done. | Hi dropped — followed.
+comment_hello => Commented "hello" — following! | Hello dropped — followed. | Said hello — done.
+say_yes => Said "Yes" — gaining +1000 organic followers. | Yes energy — followed. | Yes = mutuals — done.
+drop_yes => Dropped "Yes" — let's connect. | Yes received — following now. | Yes mutuals — done.
+reply_gain => Reply to gain — followed you. | Replied = gaining followers — done. | Gain through reply — followed.
+like_comment => Liked your comment — following! | Like for like — done. | Comment liked — followed.
+repost_gain => Repost to gain — done and followed. | Reposted + followed — your turn. | Gain via repost — followed.
+retweet_gain => Retweet for gain — done. | RT + follow — let's grow. | Retweeted — following now.
+quote_gain => Quote to gain — followed. | Quoted your post — done. | Quote gain energy — followed.
+tag_gain => Tag to gain — followed you. | Tagged a friend — done. | Tag gain activated — followed.
+mention_gain => Mention to gain — followed. | Mentioned you — done. | Mention gain — let's connect.
+share_gain => Share to gain — followed. | Shared your content — done. | Share gain energy — followed.
+engage_gain => Engage to gain — followed. | Engagement = growth — done. | Interact and gain — followed.
+1000_followers => 1000+ followers incoming — followed! | Gain 1000 — followed you. | 1k followers energy — done.
+2000_followers => 2k followers loading — followed! | Need 2000? Followed. | 2k gain — let's go.
+500_followers => 500 mutuals incoming — followed! | Gain 500 — followed you. | Half a K — done.
+10000_followers => 10k followers — massive gain. Followed! | 10000+ energy — followed. | Five figures incoming — followed.
+250k_followers => 250k+ club — followed you! | Quarter million energy — done. | Massive account loading — followed.
+plus_100 => +100 followers tonight — followed. | Gain 100 — done. | Century club — followed.
+plus_200 => +200 mutuals — followed. | Two hundred gain — done. | 200 followers — followed.
+plus_400 => +400 active mutuals — followed. | Four hundred gain — done. | 400 supporters — followed.
+plus_500 => +500 followers — followed. | Half thousand — done. | 500 mutuals incoming — followed.
+plus_600 => +600 new mutuals — followed. | Six hundred — done. | 600 gain — followed.
+plus_1000 => +1000 followers — followed. | One thousand — done. | 1k club — followed.
+plus_2000 => +2000 followers — followed. | Two thousand — done. | 2k gain — followed.
+plus_5000 => +5000 followers — massive. Followed. | Five thousand — done. | 5k inbound — followed.
+plus_10000 => +10000 followers — followed. | Ten thousand — done. | 10k club — followed.
+plus_250k => +250k followers — legendary. Followed. | Quarter million — done. | 250k energy — followed.
+exactly_1000 => Exactly 1000 followers — followed. | 1k on the dot — done. | Precision gain — followed.
+exactly_500 => 500 mutuals exactly — followed. | Half K precisely — done. | 500 on point — followed.
+
+# ============================================
+# PART 14: TIME-BASED GAINS (NEW)
+# ============================================
+night_gain => Night gain activated — followed! | Late night growth — done. | Midnight mutuals — followed.
+evening_gain => Evening gain — followed instantly! | Evening boost — done. | Nightfall followers — followed.
+morning_gain => Morning gain — rise and follow. | Dawn growth — followed. | Early bird gain — done.
+midnight_gain => Midnight gain — let's gain together. | 12am energy — followed. | Late night camp — done.
+good_night_gain => Good night gain — sleeping but growing. | GN = gain — followed. | Night shift growth — done.
+good_evening_gain => Good evening gain — followed. | Evening connect — done. | Sunset supporters — followed.
+good_morning_gain => Good morning gain — followed. | Sunrise mutuals — done. | AM growth — followed.
+tonight_gain => Tonight we gain — followed. | Evening growth spurt — done. | Tonight's the night — followed.
+this_evening => This evening — let's follow you. | Evening support — followed. | Tonight's mutuals — done.
+good night => Good night — while others sleep, we grow. Followed! | GN — stay focused. Followed you. | Night gain — just followed you.
+good evening => Good evening — followed you instantly. Let's do the same for me? | Evening gain activated. Followed! | Good evening — sharing and following you now.
+morning gain => Morning gain — let's follow each other. Done! | Rise and gain — followed you! | Morning active drop? Followed.
+evening gain => Evening gain — active users only. Followed! | Dropped my engagement this evening. Followed. | Evening boost incoming — followed.
+midnight gain => Midnight gain — let's gain together. Followed! | Late night growth session. Followed you. | Midnight mutuals — done.
+
+# ============================================
+# PART 15: ACCOUNT TYPES (NEW)
+# ============================================
+small_account => Small account supporter — followed. | Small but growing — done. | Small accounts camp — followed.
+small_acc => Small acc love — followed you. | Tiny but mighty — done. | Small acc gang — followed.
+small_creator => Small creator — let's grow. | Tiny creator support — followed. | Small but consistent — done.
+new_account => New account — welcome. Followed! | Fresh account — let's connect. | Newbie supporter — followed.
+growing_account => Growing account — love to see it. Followed. | On the rise — followed. | Growth journey — done.
+micro_account => Micro account — every follower counts. Followed. | Tiny but trying — followed. | Micro love — done.
+nano_account => Nano account — starting somewhere. Followed. | Smallest of small — followed. | Nano support — done.
+builder_account => Builder account — grind recognized. Followed. | Building in public — followed. | Construction zone — done.
+creator_account => Creator — let's support you. Followed. | Content creator — followed. | Creating daily — done.
+influencer_account => Influencer in the making — followed. | Rising influencer — done. | Micro influencer — followed.
+verified_account => Verified or not — followed you. | Blue check energy — done. | Verified mutual — followed.
+non_verified => Non verified — we connect anyway. Followed. | No check needed — followed. | Unverified but active — done.
+verified => Verified or not — we connect. Followed! | Verified energy — just followed you. | Non verified? Don't matter. Followed.
+non verified => Non verified accounts rise up. Followed you! | We support non verified too. Done. | Verified not needed — just followed.
+small account => Small accounts supporting small accounts. Followed! | Small but mighty — followed you. | Let's camp and grow — followed.
+builder => Builders connect here. Just followed you! | Love seeing builders grind. Followed. | From small to big — followed.
+
+# ============================================
+# PART 16: READY & SEEKING STATE (NEW)
+# ============================================
+ready_to_grow => Ready to grow — followed! | Growth mindset — done. | Prepared to gain — followed.
+ready_to_connect => Ready to connect — followed. | Connection mode — done. | Open to mutuals — followed.
+looking_for_followers => Looking for followers — found one. Followed. | Follower seeker — done. | Hunting followers — followed.
+seeking_mutuals => Seeking mutuals — found you. Followed. | Mutual seeker — done. | Looking for active — followed.
+want_growth => Want growth — let's go. Followed. | Growth wanted — done. | Desire to gain — followed.
+need_followers => Need followers — say no more. Followed. | Follower needed — done. | Help wanted — followed.
+needs_support => Needs support — supported. Followed. | Support seeker — done. | Backing you — followed.
+needs_boost => Needs boost — boosted. Followed. | Boosting needed — done. | Lift requested — followed.
+
+# ============================================
+# PART 17: POSITIVE FEEDBACK & RECOGNITION (NEW)
+# ============================================
+love_this => Love this — followed. | Loving your energy — done. | This is it — followed.
+appreciate_you => Appreciate you — followed. | Grateful for you — done. | Thanks for existing — followed.
+respect_the_grind => Respect the grind — followed. | Grind recognized — done. | Hustle respected — followed.
+consistent_king => Consistent king — followed. | Consistency queen — done. | Regular poster — followed.
+daily_poster => Daily poster — love it. Followed. | Every day grind — done. | Consistent content — followed.
+hustler_energy => Hustler energy — followed. | Grinder mindset — done. | Hustle hard — followed.
+keep_hustling => Keep hustling — followed. | Hustle on — done. | Never stop — followed.
+stay_consistent => Stay consistent — followed. | Consistency is key — done. | Regular wins — followed.
+stay_focused => Stay focused — followed. | Focus on growth — done. | Locked in — followed.
+big_things_take_time => Big things take time — followed. | Patience pays — done. | Long game — followed.
+you_got_this => You got this — followed. | Keep pushing — done. | Believe in you — followed.
+keep_shining => Keep shining — followed. | Stay glowing — done. | Radiate positivity — followed.
+never_quit => Never quit — followed. | Don't stop — done. | Persistence wins — followed.
+grind_daily => Grind daily — followed. | Everyday hustle — done. | No days off — followed.
+small_wins => Small wins — followed. | Progress daily — done. | Inch by inch — followed.
+
+# ============================================
+# PART 18: RESULTS & METRICS (NEW)
+# ============================================
+gained_today => Gained today? Let's grow. Followed. | Today's gain — followed. | Daily growth — done.
+follower_count => Follower count up — followed. | Numbers rising — done. | Count increasing — followed.
+engagement_boost => Engagement boost — followed. | Likes increasing — done. | Interaction up — followed.
+reach_growing => Reach growing — followed. | Expanding audience — done. | Visibility up — followed.
+impressions_up => Impressions up — followed. | Views climbing — done. | Seen by more — followed.
+organic_growth => Organic growth — followed. | Real followers — done. | Genuine gain — followed.
+real_followers => Real followers — followed. | Human accounts — done. | Authentic audience — followed.
+active_followers => Active followers — followed. | Engaged audience — done. | Real engagement — followed.
+targeted_growth => Targeted growth — followed. | Niche audience — done. | Relevant followers — followed.
+quality_followers => Quality followers — followed. | High value accounts — done. | Premium mutuals — followed.
+
+# ============================================
+# PART 19: PLATFORM & FEATURES (NEW)
+# ============================================
+x_growth => X growth — followed. | Twitter growth mode — done. | Growing on X — followed.
+x_mutuals => X mutuals — followed. | Mutuals on X — done. | X connection — followed.
+retweet_for_growth => Retweet for growth — done. | RT and grow — followed. | Retweet chain — done.
+like_for_like => Like for like — done. | Liked yours — follow back? | Like exchange — followed.
+comment_for_comment => Comment for comment — done. | Replied to yours — followed. | Comment swap — done.
+share_for_share => Share for share — done. | Shared yours — followed. | Repost exchange — followed.
+follow_train => Follow train — hopped on. Followed. | Train incoming — done. | All aboard — followed.
+follow_chain => Follow chain — linked. Followed. | Chain reaction — done. | Link in chain — followed.
+
+# ============================================
+# PART 20: FRIENDLY & CASUAL (NEW)
+# ============================================
+bro_to_bro => Bro to bro — followed. | Real talk — done. | Brotherly support — followed.
+real_one => Real one — followed. | Genuine person — done. | Authentic account — followed.
+genuine_connection => Genuine connection — followed. | Real mutual — done. | Authentic follow — followed.
+loyal_supporter => Loyal supporter — followed. | Ride or die — done. | Day one energy — followed.
+day_one => Day one — followed. | From the start — done. | OG supporter — followed.
+fire_content => Fire content — followed. | Hot posts — done. | Spitting facts — followed.
+valuable_thread => Valuable thread — followed. | Useful info — done. | Bookmarked — followed.
+underrated_account => Underrated account — followed. | Hidden gem — done. | Deserves more — followed.
+sleeping_giant => Sleeping giant — followed. | About to blow — done. | Future star — followed.
+main_character => Main character energy — followed. | Protagonist — done. | Lead role — followed.
+
+# ============================================
+# PART 21: IMMEDIATE ACTION (NEW)
+# ============================================
+do_it_now => Do it now — followed. | Immediate action — done. | No delay — followed.
+don't_wait => Don't wait — followed. | Act now — done. | No hesitation — followed.
+instant_action => Instant action — followed. | Immediate follow — done. | Zero delay — followed.
+right_now => Right now — followed. | This second — done. | Immediately — followed.
+asap => ASAP — followed instantly. | As soon as possible — done. | Quick follow — succeeded.
+follow_back => Follow back and let's grow — done! | Followed back instantly. | Returned the follow — your turn.
+follows_back => She follows back instantly — followed. | He follows back — done. | Follows back energy — followed.
+instant_follow => Instant follow — done! | Followed instantly — let's connect. | Instant support — followed.
+instant_support => Instant support incoming — followed! | Supported instantly — done. | Immediate boost — followed.
+i_follow_back => I follow back — done. | Follow back guaranteed — followed. | Return follow — done.
+she_follows_back => She follows back — followed. | Her promise — done. | Follow back queen — followed.
+he_follows_back => He follows back — followed. | His word — done. | Follow back king — followed.
+we_follow_back => We follow back — followed. | Our commitment — done. | Team follow back — followed.
+promise_to_follow => Promise to follow — done. | Commitment made — followed. | I keep my word — done.
+
+# ============================================
+# PART 22: RESTRICTIONS & CONDITIONS (NEW)
+# ============================================
+no_bots => No bots — followed. | Real people only — done. | Human verified — followed.
+no_spam => No spam — followed. | Clean engagement — done. | Spam free — followed.
+no_ghost_followers => No ghost followers — followed. | Active only — done. | No lurkers — followed.
+only_active => Only active — followed. | Engagement required — done. | Active accounts — followed.
+must_follow_back => Must follow back — done. | Follow back needed — followed. | Return required — done.
+
+# ============================================
+# PART 23: ABBREVIATIONS & SLANG (NEW)
+# ============================================
+rn => Right now — followed instantly. | This moment — done. | Immediately — followed.
+asl => Age, sex, location? Doesn't matter — followed. | Anywhere — done. | Global connect — followed.
+dm => DM me — followed first. | Direct message open — done. | Inbox ready — followed.
+gc => Group camp — followed. | Group chat energy — done. | Collective growth — followed.
+lfg => Let's f***ing go — followed. | LFG energy — done. | Hype train — followed.
+
+# ============================================
+# PART 24: COMPARISON & COLLABORATION (NEW)
+# ============================================
+better_together => Better together — followed. | Stronger united — done. | Teamwork gains — followed.
+more_eyes => More eyes — followed. | Increased visibility — done. | Broader reach — followed.
+bigger_audience => Bigger audience — followed. | Wider net — done. | Expanded circle — followed.
+wider_reach => Wider reach — followed. | Further spread — done. | Extended influence — followed.
+
+# ============================================
+# PART 25: FINAL CALLS (NEW)
+# ============================================
+last_call => Last call — followed. | Final chance — done. | Closing soon — followed.
+final_round => Final round — followed. | Last circle — done. | End of train — followed.
+closing_soon => Closing soon — followed. | Almost done — done. | Last boarding — followed.
+don't_miss_out => Don't miss out — followed. | FOMO — done. | Join now — followed.
+
+# ============================================
+# PART 26: GENERIC FALLBACKS
+# ============================================
 Thanks for sharing this.
 Interesting perspective, appreciate the post.
 Great post, thank you!

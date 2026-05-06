@@ -144,6 +144,8 @@ export type AutoReplyOptions = {
   minTweetLength?: number;
   timeoutMs?: number;
   sourceTweetText?: string;
+  excludeReplyTexts?: string[];
+  onReplySubmitted?: (replyText: string) => void;
 };
 
 type FollowState = 'following' | 'not-following' | 'blocked' | 'unknown';
@@ -1511,6 +1513,8 @@ export class XActions {
       minTweetLength = 5,
       timeoutMs = 30000,
       sourceTweetText = '',
+      excludeReplyTexts = [],
+      onReplySubmitted = () => undefined,
     } = options;
 
     const timeoutPromise = new Promise<boolean>((_, reject) => {
@@ -1528,6 +1532,8 @@ export class XActions {
         maxReplyLength,
         minTweetLength,
         sourceTweetText,
+        excludeReplyTexts,
+        onReplySubmitted,
       });
       return await Promise.race([run, timeoutPromise]);
     } catch (error) {
@@ -1550,6 +1556,8 @@ export class XActions {
         | 'maxReplyLength'
         | 'minTweetLength'
         | 'sourceTweetText'
+        | 'excludeReplyTexts'
+        | 'onReplySubmitted'
       >
     >,
   ): Promise<boolean> {
@@ -1563,6 +1571,8 @@ export class XActions {
       maxReplyLength,
       minTweetLength,
       sourceTweetText,
+      excludeReplyTexts,
+      onReplySubmitted,
     } = options;
 
     let tweetText = sourceTweetText.trim();
@@ -1576,7 +1586,7 @@ export class XActions {
 
     let replyContent = '';
     if (mode === 'template' || mode === 'hybrid') {
-      replyContent = await this.generateTemplateReply(tweetText, templatePath);
+      replyContent = await this.generateTemplateReply(tweetText, templatePath, excludeReplyTexts);
       if (replyContent) {
         console.log('[autoReply] Template reply selected');
       } else if (mode === 'template') {
@@ -1608,6 +1618,13 @@ export class XActions {
       return false;
     }
 
+    const uniqueReplyContent = this.ensureUniqueReplyContent(replyContent, excludeReplyTexts);
+    if (!uniqueReplyContent) {
+      console.log('[autoReply] Skip: generated reply is duplicate of recent replies');
+      return false;
+    }
+    replyContent = uniqueReplyContent;
+
     if (replyContent.length > maxReplyLength) {
       replyContent = `${replyContent.slice(0, maxReplyLength - 3)}...`;
     }
@@ -1618,16 +1635,22 @@ export class XActions {
       await HumanBehavior.delay(800, 1600);
     }
 
-    return this.replyToTweet(page, {
+    const submitted = await this.replyToTweet(page, {
       replyText: replyContent,
       likeAfterReply: false,
       stayOnPage,
       maxReplyLength,
       timeoutMs: 15000,
     });
+    if (submitted) onReplySubmitted?.(replyContent);
+    return submitted;
   }
 
-  private static async generateTemplateReply(tweetText: string, templatePath: string): Promise<string> {
+  private static async generateTemplateReply(
+    tweetText: string,
+    templatePath: string,
+    excludeReplyTexts: string[] = [],
+  ): Promise<string> {
     try {
       const content = await readFile(templatePath, 'utf8');
       const lines = content
@@ -1637,6 +1660,11 @@ export class XActions {
 
       const keywordTemplates: Array<{ keyword: string; replies: string[] }> = [];
       const genericReplies: string[] = [];
+      const recentSet = new Set(
+        excludeReplyTexts
+          .map((text) => this.normalizeReplyText(text))
+          .filter((text) => text.length > 0),
+      );
 
       for (const line of lines) {
         const sepIndex = line.indexOf('=>');
@@ -1654,18 +1682,57 @@ export class XActions {
       const normalizedTweet = tweetText.toLowerCase();
       for (const item of keywordTemplates) {
         if (normalizedTweet.includes(item.keyword)) {
-          return item.replies[Math.floor(Math.random() * item.replies.length)] ?? '';
+          return this.pickReplyAvoidingRecent(item.replies, recentSet);
         }
       }
 
       if (genericReplies.length > 0) {
-        return genericReplies[Math.floor(Math.random() * genericReplies.length)] ?? '';
+        return this.pickReplyAvoidingRecent(genericReplies, recentSet);
       }
 
       return '';
     } catch {
       return '';
     }
+  }
+
+  private static normalizeReplyText(text: string): string {
+    return text.trim().toLowerCase().replace(/\s+/g, ' ');
+  }
+
+  private static pickReplyAvoidingRecent(candidates: string[], recentSet: Set<string>): string {
+    const uniqueCandidates = Array.from(new Set(candidates.map((item) => item.trim()).filter(Boolean)));
+    if (uniqueCandidates.length === 0) return '';
+
+    const freshCandidates = uniqueCandidates.filter(
+      (item) => !recentSet.has(this.normalizeReplyText(item)),
+    );
+    const pickPool = freshCandidates.length > 0 ? freshCandidates : uniqueCandidates;
+    return pickPool[Math.floor(Math.random() * pickPool.length)] ?? '';
+  }
+
+  private static ensureUniqueReplyContent(
+    replyContent: string,
+    excludeReplyTexts: string[],
+  ): string {
+    const normalizedReply = this.normalizeReplyText(replyContent);
+    if (!normalizedReply) return '';
+
+    const recentSet = new Set(
+      excludeReplyTexts
+        .map((text) => this.normalizeReplyText(text))
+        .filter((text) => text.length > 0),
+    );
+    if (!recentSet.has(normalizedReply)) return replyContent.trim();
+
+    const fallbackCandidates = [
+      'Great point, thanks for sharing.',
+      'Interesting perspective, appreciate the post.',
+      'This is helpful, thanks for posting.',
+      'Valuable insight, thank you.',
+      'Good take, thanks for the update.',
+    ];
+    return this.pickReplyAvoidingRecent(fallbackCandidates, recentSet);
   }
 
   static async getCurrentTweetText(page: Page): Promise<string | null> {

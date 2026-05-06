@@ -97,18 +97,18 @@ Do not commit `.env`, real cookies, access tokens, or credentials.
 
 ## Common commands
 
-| Command | Purpose |
-|---|---|
-| `npm run test` | Run all tests. |
-| `npm run test:chromium` | Run only Chromium project. |
-| `npm run test:smoke` | Run tests tagged `@smoke`. |
-| `npm run test:headed` | Run visible browser. |
-| `npm run test:debug` | Start Playwright debugger. |
-| `npm run test:ui` | Open Playwright UI mode. |
-| `npm run typecheck` | Run TypeScript compiler checks. |
-| `npm run lint` | Run ESLint. |
-| `npm run format` | Format files with Prettier. |
-| `npm run verify` | Run typecheck, lint, format check, and tests. |
+| Command                 | Purpose                                       |
+| ----------------------- | --------------------------------------------- |
+| `npm run test`          | Run all tests.                                |
+| `npm run test:chromium` | Run only Chromium project.                    |
+| `npm run test:smoke`    | Run tests tagged `@smoke`.                    |
+| `npm run test:headed`   | Run visible browser.                          |
+| `npm run test:debug`    | Start Playwright debugger.                    |
+| `npm run test:ui`       | Open Playwright UI mode.                      |
+| `npm run typecheck`     | Run TypeScript compiler checks.               |
+| `npm run lint`          | Run ESLint.                                   |
+| `npm run format`        | Format files with Prettier.                   |
+| `npm run verify`        | Run typecheck, lint, format check, and tests. |
 
 ## Profile manager
 
@@ -131,8 +131,12 @@ running stealth checks, and using the TypeScript APIs.
 - Keep selectors close to page objects.
 - Prefer stable test IDs only when user-facing locators are not reliable.
 - npx tsx src/profile-launcher.ts profile_01_id https://x.com/home --read-comments --follow-verified-users --max-comments 100 --extract-detailed-info --max-users-to-process 10 --like-current-tweet
-npx tsx src/profile-launcher.ts profile_01_id https://x.com/home --read-comments --feed-tab following --follow yes --follow-verified-users --max-comments 3 --extract-detailed-info --max-users-to-process 1 --like-current-tweet
+  npx tsx src/profile-launcher.ts profile_01_id https://x.com/home --read-comments --feed-tab following --follow yes --follow-verified-users --max-comments 3 --extract-detailed-info --max-users-to-process 1 --like-current-tweet
 
 npx tsx src/profile-launcher.ts profile_01_id https://x.com/home --feed-tab following --read-comments --follow yes --follow-verified
 -users --max-comments 1 --extract-detailed-info --max-users-to-process 1 --reply-text auto --auto-reply-template ./reply-templates.txt
- --deepseek-model deepseek-chat --reply-stay --reply-max-length 280 --reply-timeout-ms 15000 --min-tweet-length 5 --like-current-tweet
+--deepseek-model deepseek-chat --reply-stay --reply-max-length 280 --reply-timeout-ms 15000 --min-tweet-length 5 --like-current-tweet
+
+npx tsx src/profile-launcher.ts profile_01_id https://x.com/home --schedule-loop --schedule-interval-minutes 20
+
+npx tsx src/profile-launcher.ts profile_behaha2709_id https://x.com/home --schedule-loop --schedule-interval-minutes 11 --schedule-max-runs --follow yes --feed-tab following --read-comments --like-current-tweet --follow-verified-users --reply-text auto --auto-reply-template ./reply-templates.txt
