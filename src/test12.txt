@@ -1,0 +1,38 @@
+﻿# LIVE TESTING PRIORITY: txtgen -> template
+
+Muc tieu:
+- Reply tu dong cho cac case `summary`, `developer`, `testing live`.
+- Uu tien su dung `txtgen` de tao noi dung tu nhien.
+- Neu `txtgen` loi, timeout, hoac tra ve rong thi chuyen sang `template`.
+
+Quy tac xu ly:
+1. Thu `txtgen` truoc.
+2. Neu `txtgen` that bai (`throw error`, `timeout`, `empty output`) thi fallback sang `reply-templates.txt`.
+3. Neu template khong co keyword phu hop thi dung generic fallback.
+
+Pseudo flow:
+```ts
+async function generateReply(input: string) {
+  try {
+    const txtgenReply = await withTimeout(runTxtgen(input), 2500);
+    if (txtgenReply && txtgenReply.trim()) return txtgenReply;
+  } catch (e) {
+    // txtgen failed -> fallback template
+  }
+
+  const templateReply = templateManager.getReply(input);
+  if (templateReply && templateReply.trim()) return templateReply;
+
+  return "Thanks for sharing this.";
+}
+```
+
+Keyword uu tien test:
+- `summary`
+- `developer`
+- `testing live`
+
+Mong doi khi test live:
+- txtgen hoat dong: tra ve cau da dang, tu nhien.
+- txtgen bi loi/timeout: van tra ve reply hop le tu template.
+- Khong de bot bi dung do khong sinh duoc noi dung.

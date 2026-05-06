@@ -132,12 +132,13 @@ export type ReplyToTweetOptions = {
   timeoutMs?: number;
 };
 
-export type AutoReplyMode = 'template' | 'ai' | 'hybrid';
+export type AutoReplyMode = 'template' | 'ai' | 'txtgen' | 'hybrid';
 export type AutoReplyOptions = {
   mode?: AutoReplyMode;
   templatePath?: string;
   deepseekApiKey?: string;
   deepseekModel?: string;
+  txtgenTimeoutMs?: number;
   likeBeforeReply?: boolean;
   stayOnPage?: boolean;
   maxReplyLength?: number;
@@ -1503,10 +1504,11 @@ export class XActions {
     options: AutoReplyOptions = {},
   ): Promise<boolean> {
     const {
-      mode = 'template',
+      mode = 'hybrid',
       templatePath = './reply-templates.txt',
       deepseekApiKey = process.env.DEEPSEEK_API_KEY ?? '',
       deepseekModel = 'deepseek-chat',
+      txtgenTimeoutMs = 2500,
       likeBeforeReply = false,
       stayOnPage = false,
       maxReplyLength = 280,
@@ -1527,6 +1529,7 @@ export class XActions {
         templatePath,
         deepseekApiKey,
         deepseekModel,
+        txtgenTimeoutMs,
         likeBeforeReply,
         stayOnPage,
         maxReplyLength,
@@ -1551,6 +1554,7 @@ export class XActions {
         | 'templatePath'
         | 'deepseekApiKey'
         | 'deepseekModel'
+        | 'txtgenTimeoutMs'
         | 'likeBeforeReply'
         | 'stayOnPage'
         | 'maxReplyLength'
@@ -1566,6 +1570,7 @@ export class XActions {
       templatePath,
       deepseekApiKey,
       deepseekModel,
+      txtgenTimeoutMs,
       likeBeforeReply,
       stayOnPage,
       maxReplyLength,
@@ -1585,12 +1590,21 @@ export class XActions {
     }
 
     let replyContent = '';
-    if (mode === 'template' || mode === 'hybrid') {
+    if (mode === 'txtgen' || mode === 'hybrid') {
+      replyContent = await this.generateTxtgenReply(tweetText, txtgenTimeoutMs);
+      if (replyContent) {
+        console.log('[autoReply] Txtgen reply selected');
+      } else {
+        console.warn('[autoReply] Txtgen failed/timeout/empty, fallback to template');
+      }
+    }
+
+    if (!replyContent && (mode === 'template' || mode === 'hybrid' || mode === 'txtgen')) {
       replyContent = await this.generateTemplateReply(tweetText, templatePath, excludeReplyTexts);
       if (replyContent) {
         console.log('[autoReply] Template reply selected');
-      } else if (mode === 'template') {
-        console.warn('[autoReply] No template matched in template mode');
+      } else if (mode === 'template' || mode === 'txtgen') {
+        console.warn('[autoReply] No template matched');
         return false;
       }
     }
@@ -1644,6 +1658,30 @@ export class XActions {
     });
     if (submitted) onReplySubmitted?.(replyContent);
     return submitted;
+  }
+
+  private static async generateTxtgenReply(tweetText: string, timeoutMs: number): Promise<string> {
+    const runTxtgen = async (): Promise<string> => {
+      const mod = await import('@ndaidong/txtgen');
+      const wordCount = tweetText.trim().split(/\s+/).filter(Boolean).length;
+      if (tweetText.includes('?') || /\b(how|why|what|when|where)\b/i.test(tweetText)) {
+        return mod.sentence();
+      }
+      if (wordCount > 20) {
+        return mod.paragraph(2);
+      }
+      return mod.sentence();
+    };
+
+    try {
+      const timeoutPromise = new Promise<string>((_, reject) => {
+        setTimeout(() => reject(new Error('txtgen timeout')), timeoutMs);
+      });
+      const result = await Promise.race([runTxtgen(), timeoutPromise]);
+      return typeof result === 'string' ? result.trim() : '';
+    } catch {
+      return '';
+    }
   }
 
   private static async generateTemplateReply(

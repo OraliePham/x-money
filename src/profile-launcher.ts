@@ -50,8 +50,9 @@ type LauncherArgs = {
   replyStay: boolean;
   replyMaxLength: number;
   replyTimeoutMs: number;
-  autoReplyMode: 'template' | 'ai' | 'hybrid';
+  autoReplyMode: 'template' | 'ai' | 'txtgen' | 'hybrid';
   autoReplyTemplate: string;
+  txtgenTimeoutMs: number;
   deepseekKey: string;
   deepseekModel: string;
   likeBeforeReply: boolean;
@@ -94,6 +95,7 @@ function parseArgs(argv: string[]): LauncherArgs {
     replyTimeoutMs: parseReplyTimeoutMs(argv),
     autoReplyMode: parseAutoReplyMode(argv),
     autoReplyTemplate: parseStringArg(argv, '--auto-reply-template', './reply-templates.txt'),
+    txtgenTimeoutMs: parseTxtgenTimeoutMs(argv),
     deepseekKey: parseStringArg(argv, '--deepseek-key', process.env.DEEPSEEK_API_KEY ?? ''),
     deepseekModel: parseStringArg(argv, '--deepseek-model', 'deepseek-chat'),
     likeBeforeReply: argv.includes('--like-before-reply'),
@@ -115,6 +117,7 @@ function collectPositionalArgs(argv: string[]): string[] {
     '--reply-timeout-ms',
     '--auto-reply-mode',
     '--auto-reply-template',
+    '--txtgen-timeout-ms',
     '--deepseek-key',
     '--deepseek-model',
     '--min-tweet-length',
@@ -201,12 +204,20 @@ function parseReplyTimeoutMs(argv: string[]): number {
   return Number.isFinite(parsed) && parsed > 0 ? parsed : 15000;
 }
 
-function parseAutoReplyMode(argv: string[]): 'template' | 'ai' | 'hybrid' {
+function parseAutoReplyMode(argv: string[]): 'template' | 'ai' | 'txtgen' | 'hybrid' {
   const idx = argv.findIndex((arg) => arg === '--auto-reply-mode');
-  if (idx === -1) return 'template';
+  if (idx === -1) return 'hybrid';
   const raw = argv[idx + 1]?.trim().toLowerCase();
-  if (raw === 'ai' || raw === 'hybrid') return raw;
+  if (raw === 'ai' || raw === 'txtgen' || raw === 'hybrid') return raw;
   return 'template';
+}
+
+function parseTxtgenTimeoutMs(argv: string[]): number {
+  const idx = argv.findIndex((arg) => arg === '--txtgen-timeout-ms');
+  if (idx === -1) return 2500;
+  const raw = argv[idx + 1];
+  const parsed = raw ? Number.parseInt(raw, 10) : Number.NaN;
+  return Number.isFinite(parsed) && parsed > 0 ? parsed : 2500;
 }
 
 function parseStringArg(argv: string[], flag: string, defaultValue: string): string {
@@ -721,8 +732,6 @@ async function runClickReadLikePipeline(
     }
   }
 
-  if (!args.likeCurrentTweet) return;
-
   let likeHandledBeforeReply = false;
   if (args.replyText && !args.replyStay && args.likeCurrentTweet) {
     const likedBeforeReply = await XActions.likeCurrentTweet(page, {
@@ -754,6 +763,7 @@ async function runClickReadLikePipeline(
       ? await XActions.autoReplyToTweet(page, {
           mode: args.autoReplyMode,
           templatePath: args.autoReplyTemplate,
+          txtgenTimeoutMs: args.txtgenTimeoutMs,
           deepseekApiKey: args.deepseekKey,
           deepseekModel: args.deepseekModel,
           likeBeforeReply: args.likeBeforeReply,
@@ -1006,6 +1016,7 @@ async function main(): Promise<void> {
   console.log(`   --reply-timeout-ms: ${args.replyTimeoutMs}`);
   console.log(`   --auto-reply-mode: ${args.autoReplyMode}`);
   console.log(`   --auto-reply-template: ${args.autoReplyTemplate}`);
+  console.log(`   --txtgen-timeout-ms: ${args.txtgenTimeoutMs}`);
   console.log(`   --deepseek-key: ${args.deepseekKey ? '***set***' : '(empty)'}`);
   console.log(`   --deepseek-model: ${args.deepseekModel}`);
   console.log(`   --like-before-reply: ${args.likeBeforeReply}`);

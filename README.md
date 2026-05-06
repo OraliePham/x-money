@@ -139,4 +139,6 @@ npx tsx src/profile-launcher.ts profile_01_id https://x.com/home --feed-tab foll
 
 npx tsx src/profile-launcher.ts profile_01_id https://x.com/home --schedule-loop --schedule-interval-minutes 20
 
-npx tsx src/profile-launcher.ts profile_behaha2709_id https://x.com/home --schedule-loop --schedule-interval-minutes 11 --schedule-max-runs --follow yes --feed-tab following --read-comments --like-current-tweet --follow-verified-users --reply-text auto --auto-reply-template ./reply-templates.txt
+npx tsx src/profile-launcher.ts profile_01_id https://x.com/home --schedule-loop --schedule-interval-minutes 11 --schedule-max-runs --follow yes --feed-tab following --read-comments --like-current-tweet --follow-verified-users --reply-text auto --auto-reply-template ./reply-templates.txt
+
+npx tsx src/profile-launcher.ts profile_behaha2709_id https://x.com/home   --schedule-loop   --schedule-interval-minutes 2   --schedule-max-runs 50   --follow yes   --feed-tab following   --read-comments   --like-current-tweet   --follow-verified-users   --reply-text auto   --auto-reply-mode hybrid   --txtgen-timeout-ms 2500   --auto-reply-template ./reply-templates.txt
